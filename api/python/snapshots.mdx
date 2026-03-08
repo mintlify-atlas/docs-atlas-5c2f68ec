@@ -1,0 +1,383 @@
+---
+title: Snapshots
+description: Classes for iterative execution and resuming paused code
+---
+
+Monty provides snapshot classes that allow you to pause and resume code execution. This is useful for handling external function calls iteratively, implementing async operations, or serializing execution state.
+
+## FunctionSnapshot
+
+Represents a paused execution waiting for an external function call return value. Contains information about the pending external function call and allows resuming execution with the return value.
+
+### Properties
+
+<ResponseField name="script_name" type="str">
+  The name of the script being executed
+</ResponseField>
+
+<ResponseField name="is_os_function" type="bool">
+  Whether this snapshot is for an OS function call (e.g., `Path.stat`)
+</ResponseField>
+
+<ResponseField name="is_method_call" type="bool">
+  Whether this snapshot is for a dataclass method call (first arg is `self`)
+</ResponseField>
+
+<ResponseField name="function_name" type="str | OsFunction">
+  The name of the function being called (external function or OS function like `'Path.stat'`). Will be an `OsFunction` if `is_os_function` is `True`.
+</ResponseField>
+
+<ResponseField name="args" type="tuple[Any, ...]">
+  The positional arguments passed to the external function
+</ResponseField>
+
+<ResponseField name="kwargs" type="dict[str, Any]">
+  The keyword arguments passed to the external function
+</ResponseField>
+
+<ResponseField name="call_id" type="int">
+  The unique identifier for this external function call
+</ResponseField>
+
+### Methods
+
+#### resume()
+
+```python
+def resume(
+    self,
+    *,
+    return_value: Any = ...,
+    exception: BaseException = ...,
+    future: EllipsisType = ...,
+) -> FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete
+```
+
+Resume execution with a return value, exception, or future. Only one of the parameters should be provided. `resume()` may only be called once on each `FunctionSnapshot` instance. The GIL is released allowing parallel execution.
+
+<ParamField path="return_value" type="Any">
+  The value to return from the external function call
+</ParamField>
+
+<ParamField path="exception" type="BaseException">
+  An exception to raise in the Monty interpreter
+</ParamField>
+
+<ParamField path="future" type="EllipsisType">
+  A future to await in the Monty interpreter. Pass `...` (ellipsis) to indicate a pending future.
+</ParamField>
+
+<ResponseField type="FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete">
+  - `FunctionSnapshot` if another external function call is pending
+  - `NameLookupSnapshot` if another name lookup is pending
+  - `FutureSnapshot` if futures need to be resolved
+  - `MontyComplete` if execution finished
+</ResponseField>
+
+**Raises:**
+- `TypeError`: If both arguments are provided or if invalid arguments are passed
+- `RuntimeError`: If execution has already completed or if resume was already called
+- `MontyRuntimeError`: If the code raises an exception during execution
+
+#### dump()
+
+```python
+def dump(self) -> bytes
+```
+
+Serialize the FunctionSnapshot instance to a binary format. This allows suspending execution and resuming later, potentially in a different process.
+
+<ResponseField type="bytes">
+  Bytes containing the serialized FunctionSnapshot instance
+</ResponseField>
+
+**Note:** The `print_callback` is not serialized and must be re-provided via `set_print_callback()` after loading if print output is needed.
+
+**Raises:**
+- `ValueError`: If serialization fails
+- `RuntimeError`: If the progress has already been resumed
+
+#### load() (static method)
+
+```python
+@staticmethod
+def load(
+    data: bytes,
+    *,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+    dataclass_registry: list[type] | None = None,
+) -> FunctionSnapshot
+```
+
+Deserialize a FunctionSnapshot instance from binary format.
+
+<ParamField path="data" type="bytes" required>
+  The serialized FunctionSnapshot data from `dump()`
+</ParamField>
+
+<ParamField path="print_callback" type="Callable[[Literal['stdout'], str], None] | None">
+  Optional callback for print output
+</ParamField>
+
+<ParamField path="dataclass_registry" type="list[type] | None">
+  Optional list of dataclass types to register for proper `isinstance()` support on output
+</ParamField>
+
+<ResponseField type="FunctionSnapshot">
+  A new FunctionSnapshot instance
+</ResponseField>
+
+**Raises:**
+- `ValueError`: If deserialization fails
+
+### Example
+
+```python
+import pydantic_monty
+
+code = """
+data = fetch(url)
+len(data)
+"""
+
+m = pydantic_monty.Monty(code, inputs=['url'])
+
+# Start execution - pauses when fetch() is called
+progress = m.start(inputs={'url': 'https://example.com'})
+
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    print(f"Function: {progress.function_name}")
+    print(f"Args: {progress.args}")
+    print(f"Kwargs: {progress.kwargs}")
+    print(f"Call ID: {progress.call_id}")
+    
+    # Resume with a return value
+    progress = progress.resume(return_value='hello world')
+
+if isinstance(progress, pydantic_monty.MontyComplete):
+    print(f"Output: {progress.output}")
+```
+
+## MontyComplete
+
+The result of a completed code execution.
+
+### Properties
+
+<ResponseField name="output" type="Any">
+  The final output value from the executed code
+</ResponseField>
+
+### Example
+
+```python
+import pydantic_monty
+
+m = pydantic_monty.Monty('2 + 2')
+result = m.start()
+
+if isinstance(result, pydantic_monty.MontyComplete):
+    print(result.output)
+    # Output: 4
+```
+
+## NameLookupSnapshot
+
+Represents a paused execution waiting for a name lookup to be resolved. This is used in advanced scenarios where variable lookups need external resolution.
+
+### Properties
+
+<ResponseField name="script_name" type="str">
+  The name of the script being executed
+</ResponseField>
+
+<ResponseField name="variable_name" type="str">
+  The name of the variable being looked up
+</ResponseField>
+
+### Methods
+
+#### resume()
+
+```python
+def resume(
+    self,
+    *,
+    value: Any | None = None,
+) -> FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete
+```
+
+Resume execution with the value from a name lookup, if any. If no `value` is passed, a `NameError` is raised. `resume()` may only be called once on each `NameLookupSnapshot` instance. The GIL is released allowing parallel execution.
+
+<ParamField path="value" type="Any | None">
+  The value from the name lookup, if any
+</ParamField>
+
+<ResponseField type="FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete">
+  - `FunctionSnapshot` if an external function call is pending
+  - `NameLookupSnapshot` if more futures need to be resolved
+  - `FutureSnapshot` if another name lookup is pending
+  - `MontyComplete` if execution finished
+</ResponseField>
+
+**Raises:**
+- `TypeError`: If result dict has invalid keys
+- `RuntimeError`: If execution has already completed
+- `MontyRuntimeError`: If the code raises an exception during execution
+
+#### dump() and load()
+
+Similar to `FunctionSnapshot`, `NameLookupSnapshot` also supports serialization:
+
+```python
+def dump(self) -> bytes
+
+@staticmethod
+def load(
+    data: bytes,
+    *,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+    dataclass_registry: list[type] | None = None,
+) -> NameLookupSnapshot
+```
+
+## FutureSnapshot
+
+Represents a paused execution waiting for multiple futures to be resolved. This is used when handling async operations or parallel external function calls.
+
+### Properties
+
+<ResponseField name="script_name" type="str">
+  The name of the script being executed
+</ResponseField>
+
+<ResponseField name="pending_call_ids" type="list[int]">
+  The call IDs of the pending futures. Raises an error if the snapshot has already been resumed.
+</ResponseField>
+
+### Methods
+
+#### resume()
+
+```python
+def resume(
+    self,
+    results: dict[int, ExternalResult],
+) -> FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete
+```
+
+Resume execution with results for one or more futures. `resume()` may only be called once on each `FutureSnapshot` instance. The GIL is released allowing parallel execution.
+
+<ParamField path="results" type="dict[int, ExternalResult]" required>
+  Dict mapping `call_id` to result dict. Each result dict must have either `'return_value'` or `'exception'` key (not both).
+</ParamField>
+
+<ResponseField type="FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete">
+  - `FunctionSnapshot` if an external function call is pending
+  - `NameLookupSnapshot` if more futures need to be resolved
+  - `FutureSnapshot` if more futures need to be resolved
+  - `MontyComplete` if execution finished
+</ResponseField>
+
+**Raises:**
+- `TypeError`: If result dict has invalid keys
+- `RuntimeError`: If execution has already completed
+- `MontyRuntimeError`: If the code raises an exception during execution
+
+#### dump() and load()
+
+Similar to `FunctionSnapshot`, `FutureSnapshot` also supports serialization:
+
+```python
+def dump(self) -> bytes
+
+@staticmethod
+def load(
+    data: bytes,
+    *,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+    dataclass_registry: list[type] | None = None,
+) -> FutureSnapshot
+```
+
+## ExternalResult Type
+
+The `ExternalResult` type is used when resuming `FutureSnapshot` instances. It's a union type:
+
+```python
+class ExternalReturnValue(TypedDict):
+    return_value: Any
+
+class ExternalException(TypedDict):
+    exception: Exception
+
+class ExternalFuture(TypedDict):
+    future: EllipsisType
+
+ExternalResult = ExternalReturnValue | ExternalException | ExternalFuture
+```
+
+### Example with FutureSnapshot
+
+```python
+import pydantic_monty
+
+code = """
+result1 = fetch('url1')
+result2 = fetch('url2')
+result1 + result2
+"""
+
+m = pydantic_monty.Monty(code)
+progress = m.start()
+
+# First function call
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    call_id_1 = progress.call_id
+    progress = progress.resume(future=...)
+
+# Second function call
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    call_id_2 = progress.call_id
+    progress = progress.resume(future=...)
+
+# Now we have a FutureSnapshot waiting for both results
+if isinstance(progress, pydantic_monty.FutureSnapshot):
+    print(f"Pending calls: {progress.pending_call_ids}")
+    
+    # Provide results for both futures
+    results = {
+        call_id_1: {'return_value': 'data1'},
+        call_id_2: {'return_value': 'data2'}
+    }
+    progress = progress.resume(results)
+
+if isinstance(progress, pydantic_monty.MontyComplete):
+    print(progress.output)
+    # Output: data1data2
+```
+
+## Serialization Example
+
+```python
+import pydantic_monty
+
+m = pydantic_monty.Monty('fetch(url)', inputs=['url'])
+progress = m.start(inputs={'url': 'https://example.com'})
+
+# Serialize the execution state
+state = progress.dump()
+
+# Later, restore and resume (e.g., in a different process)
+progress2 = pydantic_monty.FunctionSnapshot.load(state)
+result = progress2.resume(return_value='response data')
+
+if isinstance(result, pydantic_monty.MontyComplete):
+    print(result.output)
+    # Output: response data
+```
+
+## Related
+
+- [Monty class](/api/python/monty) - Main class that creates snapshots via `start()`
+- [Errors](/api/python/errors) - Error types that can be raised during execution

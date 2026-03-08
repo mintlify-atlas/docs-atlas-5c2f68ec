@@ -1,0 +1,480 @@
+---
+title: Resource Limits
+description: Configure memory, time, allocation, and recursion limits to prevent DoS attacks
+---
+
+## Overview
+
+Monty enforces configurable resource limits to prevent untrusted code from consuming excessive resources. Without limits, malicious code could:
+
+- Allocate gigabytes of memory
+- Run infinite loops
+- Cause stack overflow with deep recursion
+- Generate massive strings or lists
+
+Resource limits ensure safe execution of untrusted code.
+
+## Available Limits
+
+Monty tracks four types of resource limits:
+
+<CardGroup cols={2}>
+  <Card title="Max Memory" icon="memory">
+    Limit total heap memory usage in bytes
+  </Card>
+  <Card title="Max Duration" icon="clock">
+    Timeout after specified execution time
+  </Card>
+  <Card title="Max Allocations" icon="boxes-stacked">
+    Limit number of heap allocations
+  </Card>
+  <Card title="Max Recursion Depth" icon="layer-group">
+    Prevent stack overflow (default: 1000)
+  </Card>
+</CardGroup>
+
+## Setting Resource Limits
+
+<CodeGroup>
+```python Python
+import pydantic_monty
+from datetime import timedelta
+
+# Configure limits
+limits = pydantic_monty.ResourceLimits(
+    max_memory=1_000_000,        # 1 MB
+    max_duration=timedelta(seconds=5),
+    max_allocations=10_000,
+    max_recursion_depth=100
+)
+
+m = pydantic_monty.Monty('x * 2', inputs=['x'])
+
+try:
+    result = m.run(inputs={'x': 42}, limits=limits)
+    print(result)
+except pydantic_monty.MontyException as e:
+    print(f"Resource limit exceeded: {e}")
+```
+
+```typescript TypeScript
+import { Monty, ResourceLimits } from '@pydantic/monty';
+
+// Configure limits
+const limits: ResourceLimits = {
+  maxMemory: 1_000_000,        // 1 MB
+  maxDurationMs: 5000,          // 5 seconds
+  maxAllocations: 10_000,
+  maxRecursionDepth: 100
+};
+
+const m = new Monty('x * 2', { inputs: ['x'] });
+
+try {
+  const result = m.run({ inputs: { x: 42 }, limits });
+  console.log(result);
+} catch (e) {
+  console.error(`Resource limit exceeded: ${e}`);
+}
+```
+
+```rust Rust
+use monty::{MontyRun, MontyObject, ResourceLimits, LimitedTracker, PrintWriter};
+use std::time::Duration;
+
+// Configure limits
+let limits = ResourceLimits::new()
+    .max_memory(1_000_000)        // 1 MB
+    .max_duration(Duration::from_secs(5))
+    .max_allocations(10_000)
+    .max_recursion_depth(Some(100));
+
+let tracker = LimitedTracker::new(limits);
+
+let runner = MontyRun::new(
+    "x * 2".to_owned(),
+    "script.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+match runner.run(
+    vec![MontyObject::Int(42)],
+    tracker,
+    &mut PrintWriter::Stdout
+) {
+    Ok(result) => println!("Result: {:?}", result),
+    Err(e) => eprintln!("Resource limit exceeded: {}", e),
+}
+```
+</CodeGroup>
+
+## Memory Limit
+
+### How It Works
+
+Monty tracks approximate heap memory usage and checks before each allocation:
+
+```python
+limits = pydantic_monty.ResourceLimits(max_memory=100_000)  # 100 KB
+
+# This will raise MemoryError
+code = "'x' * 1_000_000"  # Try to create 1 MB string
+m = pydantic_monty.Monty(code)
+try:
+    m.run(limits=limits)
+except pydantic_monty.MontyException as e:
+    print(e.exc_type)  # MemoryError
+    print(e.message)   # memory limit exceeded: 1000000 bytes > 100000 bytes
+```
+
+### Large Result Pre-checks
+
+Monty pre-checks operations that may produce large results (>100KB) **before** allocating:
+
+```python
+# These are checked BEFORE execution
+code = """
+# String repeat
+result = 'x' * 10_000_000
+
+# Power (large integers)
+result = 2 ** 10_000_000
+
+# List repeat
+result = [1, 2, 3] * 1_000_000
+
+# String replace (amplification)
+result = ('a' * 1000).replace('a', 'b' * 10_000)
+"""
+```
+
+<Note>
+The 100KB threshold (`LARGE_RESULT_THRESHOLD`) is compile-time and cannot be changed at runtime.
+</Note>
+
+### What Counts Toward Memory
+
+| Type | Memory Usage |
+|------|-------------|
+| Integers | Variable (based on value size) |
+| Floats | 8 bytes |
+| Strings | 1 byte per character + overhead |
+| Lists | ~8 bytes per element + overhead |
+| Dicts | ~24 bytes per entry + overhead |
+| Tuples | ~8 bytes per element + overhead |
+| Objects | Sum of field sizes + overhead |
+
+## Time Limit
+
+### How It Works
+
+Monty checks elapsed time periodically during execution:
+
+```python
+from datetime import timedelta
+
+limits = pydantic_monty.ResourceLimits(
+    max_duration=timedelta(seconds=1)
+)
+
+# Infinite loop will timeout
+code = """
+while True:
+    x = 1 + 1
+"""
+
+m = pydantic_monty.Monty(code)
+try:
+    m.run(limits=limits)
+except pydantic_monty.MontyException as e:
+    print(e.exc_type)  # TimeoutError
+    print(e.message)   # time limit exceeded: 1.002s > 1s
+```
+
+### Time Check Frequency
+
+Monty checks time **every 10 VM instructions** to balance:
+- Performance (checking every instruction is expensive)
+- Responsiveness (catching timeouts quickly)
+
+<Info>
+**Time is reset** after `load()` when deserializing execution state. Use `tracker_mut()` to set a new limit when resuming.
+</Info>
+
+### Setting Time Limits on Resume
+
+```python
+import pydantic_monty
+from datetime import timedelta
+
+progress = m.start(inputs={'x': 42})
+
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    # Modify time limit before resuming
+    progress.tracker_mut().set_max_duration(
+        timedelta(seconds=2)
+    )
+    
+    result = progress.resume(return_value=100)
+```
+
+## Allocation Limit
+
+### How It Works
+
+Counts the total number of heap allocations:
+
+```python
+limits = pydantic_monty.ResourceLimits(max_allocations=1000)
+
+# Each list/string/dict allocation counts
+code = """
+result = []
+for i in range(2000):  # Will exceed 1000 allocations
+    result.append(f"item {i}")
+"""
+
+m = pydantic_monty.Monty(code)
+try:
+    m.run(limits=limits)
+except pydantic_monty.MontyException as e:
+    print(e.exc_type)  # MemoryError
+    print(e.message)   # allocation limit exceeded: 1001 > 1000
+```
+
+### When to Use Allocation Limits
+
+Use allocation limits to:
+- Prevent memory fragmentation
+- Control garbage collection frequency
+- Limit total number of objects
+
+<Tip>
+Allocation limits are useful when combined with garbage collection intervals to control GC overhead.
+</Tip>
+
+## Recursion Depth Limit
+
+### How It Works
+
+Limits the maximum call stack depth:
+
+```python
+limits = pydantic_monty.ResourceLimits(max_recursion_depth=50)
+
+code = """
+def recursive(n):
+    if n == 0:
+        return 0
+    return recursive(n - 1)
+
+recursive(100)  # Will exceed depth of 50
+"""
+
+m = pydantic_monty.Monty(code)
+try:
+    m.run(limits=limits)
+except pydantic_monty.MontyException as e:
+    print(e.exc_type)  # RecursionError
+    print(e.message)   # maximum recursion depth exceeded
+```
+
+### Default Recursion Limit
+
+If not specified, Monty uses **1000** (same as CPython's default).
+
+<Warning>
+**RecursionError is catchable** in Python, unlike other resource errors. Untrusted code can catch and suppress RecursionError.
+</Warning>
+
+### Platform Considerations
+
+Very deep recursion (>500) may cause stack overflow in debug builds. Release builds handle 1000+ safely.
+
+## No Limits Mode
+
+For trusted code, use `NoLimitTracker` to disable limits:
+
+<CodeGroup>
+```python Python
+import pydantic_monty
+
+# No limits - only default recursion depth (1000)
+m = pydantic_monty.Monty('x ** 100000', inputs=['x'])
+result = m.run(inputs={'x': 2})  # No limits by default
+```
+
+```rust Rust
+use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+let runner = MontyRun::new(
+    "x ** 100000".to_owned(),
+    "script.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+// NoLimitTracker only enforces recursion depth (1000)
+let result = runner.run(
+    vec![MontyObject::Int(2)],
+    NoLimitTracker,
+    &mut PrintWriter::Stdout
+).unwrap();
+```
+</CodeGroup>
+
+<Warning>
+Never use `NoLimitTracker` with untrusted code. It only enforces recursion depth (1000).
+</Warning>
+
+## Exception Types
+
+Resource limit violations raise specific Python exceptions:
+
+| Limit Type | Python Exception |
+|------------|------------------|
+| Memory | `MemoryError` |
+| Allocations | `MemoryError` |
+| Time | `TimeoutError` |
+| Recursion | `RecursionError` |
+
+### Handling Resource Errors
+
+```python
+import pydantic_monty
+
+try:
+    result = m.run(inputs={'x': 42}, limits=limits)
+except pydantic_monty.MontyException as e:
+    if e.exc_type == 'MemoryError':
+        print("Code used too much memory")
+    elif e.exc_type == 'TimeoutError':
+        print("Code took too long")
+    elif e.exc_type == 'RecursionError':
+        print("Code recursed too deeply")
+```
+
+## Garbage Collection
+
+### GC Intervals
+
+Configure how often garbage collection runs:
+
+```python
+limits = pydantic_monty.ResourceLimits(
+    gc_interval=1000  # Run GC every 1000 allocations
+)
+```
+
+### When to Adjust GC Interval
+
+- **Lower interval** (e.g., 100): More frequent GC, lower peak memory
+- **Higher interval** (e.g., 10000): Less GC overhead, higher peak memory
+- **No interval** (`None`): Only run GC on allocation failure
+
+<Info>
+Garbage collection only matters for code that creates **reference cycles** (circular references). Most code doesn't need GC.
+</Info>
+
+## Recommended Limits
+
+### For User-Generated Code
+
+```python
+limits = pydantic_monty.ResourceLimits(
+    max_memory=10_000_000,      # 10 MB
+    max_duration=timedelta(seconds=10),
+    max_allocations=100_000,
+    max_recursion_depth=100,
+    gc_interval=1000
+)
+```
+
+### For LLM-Generated Code
+
+```python
+limits = pydantic_monty.ResourceLimits(
+    max_memory=50_000_000,      # 50 MB
+    max_duration=timedelta(seconds=30),
+    max_allocations=500_000,
+    max_recursion_depth=200,
+    gc_interval=5000
+)
+```
+
+### For Batch Processing
+
+```python
+limits = pydantic_monty.ResourceLimits(
+    max_memory=100_000_000,     # 100 MB
+    max_duration=timedelta(minutes=5),
+    max_allocations=1_000_000,
+    max_recursion_depth=500,
+    gc_interval=10000
+)
+```
+
+## Monitoring Resource Usage
+
+Track resource usage during execution:
+
+```python
+import pydantic_monty
+
+limits = pydantic_monty.ResourceLimits(
+    max_memory=1_000_000,
+    max_allocations=10_000
+)
+
+# In iterative execution, you can inspect the tracker
+progress = m.start(inputs={'x': 42}, limits=limits)
+
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    tracker = progress.tracker_mut()
+    
+    # Check current usage (Rust API)
+    # print(f"Memory used: {tracker.current_memory()}")
+    # print(f"Allocations: {tracker.allocation_count()}")
+    # print(f"Elapsed: {tracker.elapsed()}")
+    
+    result = progress.resume(return_value=100)
+```
+
+<Note>
+Resource monitoring APIs are available in the Rust API. Python/TypeScript bindings may be added in future versions.
+</Note>
+
+## Best Practices
+
+<Steps>
+  <Step title="Always Set Limits for Untrusted Code">
+    Never run untrusted code without resource limits. Always configure at least memory and time limits.
+  </Step>
+  
+  <Step title="Set Conservative Limits Initially">
+    Start with strict limits and increase based on actual usage patterns.
+  </Step>
+  
+  <Step title="Monitor and Alert">
+    Log resource limit violations to detect potential attacks or bugs.
+  </Step>
+  
+  <Step title="Adjust Time Limits on Resume">
+    When using iterative execution, set appropriate time limits before each `resume()`.
+  </Step>
+  
+  <Step title="Balance GC Frequency">
+    Adjust `gc_interval` based on your memory vs. performance requirements.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Security Model" icon="shield" href="/concepts/security">
+    Learn about Monty's sandbox isolation and security guarantees
+  </Card>
+  
+  <Card title="Execution Modes" icon="play" href="/concepts/execution-modes">
+    Understand run() vs start()/resume() execution
+  </Card>
+</CardGroup>

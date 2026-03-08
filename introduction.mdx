@@ -1,0 +1,140 @@
+---
+title: Introduction
+description: A minimal, secure Python interpreter written in Rust for use by AI
+---
+
+<Warning>
+  **Experimental** - This project is still in development and not ready for prime time.
+</Warning>
+
+Monty is a minimal, secure Python interpreter written in Rust specifically designed for running LLM-generated code safely within your agent applications.
+
+## Why Monty?
+
+Monty avoids the cost, latency, complexity, and general faff of using a full container-based sandbox for running LLM-generated code.
+
+Instead, it lets you safely run Python code written by an LLM embedded in your agent, with startup times measured in single digit microseconds — not hundreds of milliseconds.
+
+### The Problem
+
+Large Language Models can work faster, cheaper, and more reliably when they write Python (or JavaScript) code instead of relying on traditional tool calling. However, running untrusted LLM-generated code presents significant security challenges:
+
+- **Containers are slow**: Docker startup takes ~195ms, far too slow for real-time agent interactions
+- **Direct execution is dangerous**: Running code via `exec()` or subprocess gives full access to filesystem, network, and system resources
+- **WASM solutions are complex**: Options like Pyodide have slow cold starts (~2.8s) and complex setup requirements
+
+Monty solves this by providing a secure, fast, embedded Python interpreter purpose-built for agent code execution.
+
+## What Monty Can Do
+
+<CardGroup cols={2}>
+  <Card title="Run Python Subset" icon="python">
+    Execute a reasonable subset of Python code — enough for your agent to express what it wants to do
+  </Card>
+  
+  <Card title="Secure by Default" icon="shield">
+    Completely block access to the host environment: filesystem, env variables, and network access are all implemented via external function calls you control
+  </Card>
+  
+  <Card title="External Functions" icon="plug">
+    Call functions on the host — only functions you explicitly give it access to
+  </Card>
+  
+  <Card title="Type Checking" icon="check">
+    Full modern Python type hints support with [ty](https://docs.astral.sh/ty/) included in a single binary
+  </Card>
+  
+  <Card title="Snapshotting" icon="camera">
+    Snapshot to bytes at external function calls, store interpreter state in a file or database, and resume later
+  </Card>
+  
+  <Card title="Fast Startup" icon="bolt">
+    Startup extremely fast (&lt;1μs from code to execution result), with runtime performance similar to CPython (generally between 5x faster and 5x slower)
+  </Card>
+  
+  <Card title="Multi-Language Support" icon="code">
+    Call from Rust, Python, or JavaScript — Monty has no dependencies on CPython, so you can use it anywhere you can run Rust
+  </Card>
+  
+  <Card title="Resource Control" icon="gauge">
+    Track memory usage, allocations, stack depth, and execution time — cancel execution if it exceeds preset limits
+  </Card>
+</CardGroup>
+
+### Additional Features
+
+- Collect stdout and stderr and return it to the caller
+- Run async or sync code on the host via async or sync code on the host
+- Use a small subset of the standard library: `sys`, `os`, `typing`, `asyncio`, `re`, `datetime` (soon), `dataclasses` (soon), `json` (soon)
+
+## What Monty Cannot Do
+
+<Warning>
+Monty is extremely limited and designed for **one** use case: **to run code written by agents**.
+</Warning>
+
+Monty currently does not support:
+
+- The rest of the Python standard library
+- Third-party libraries (like Pydantic) — external library support is not a goal
+- Class definitions (support coming soon)
+- Match statements (support coming soon)
+
+## Use Cases
+
+Monty is designed for agent applications that need to execute LLM-generated code safely:
+
+<CardGroup cols={2}>
+  <Card title="Programmatic Tool Calling" icon="tools">
+    Replace sequential tool calls with Python code that calls your tools as functions
+  </Card>
+  
+  <Card title="Agent Code Execution" icon="robot">
+    Allow agents to write and execute Python code for complex multi-step tasks
+  </Card>
+  
+  <Card title="Safe Sandboxing" icon="lock">
+    Run untrusted code without containers or risk of host access
+  </Card>
+  
+  <Card title="PydanticAI Integration" icon="puzzle">
+    Power code-mode in [Pydantic AI](https://github.com/pydantic/pydantic-ai) for faster, more reliable agent workflows
+  </Card>
+</CardGroup>
+
+## Inspiration
+
+For motivation on why you might want to do this, see:
+
+- [Codemode](https://blog.cloudflare.com/code-mode/) from Cloudflare
+- [Programmatic Tool Calling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling) from Anthropic
+- [Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp) from Anthropic
+- [Smol Agents](https://github.com/huggingface/smolagents) from Hugging Face
+
+<Info>
+Monty will soon be used to implement `codemode` in [Pydantic AI](https://github.com/pydantic/pydantic-ai).
+</Info>
+
+## Performance Comparison
+
+| Technology | Language Completeness | Security | Start Latency | Setup Complexity |
+|------------|----------------------|----------|---------------|------------------|
+| **Monty** | Partial | Strict | **0.06ms** | Easy |
+| Docker | Full | Good | 195ms | Intermediate |
+| Pyodide | Full | Poor | 2800ms | Intermediate |
+| WASI/Wasmer | Partial | Strict | 66ms | Intermediate |
+| Sandboxing Service | Full | Strict | 1033ms | Intermediate |
+
+Monty offers the fastest startup time while maintaining strict security guarantees.
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Monty for Python, JavaScript, or Rust
+  </Card>
+  
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get started with your first Monty program
+  </Card>
+</CardGroup>

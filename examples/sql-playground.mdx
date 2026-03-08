@@ -1,0 +1,341 @@
+---
+title: SQL Playground
+description: Query CSV files with SQL and analyze sentiment from JSON data
+---
+
+## Overview
+
+This example demonstrates a task that **cannot be solved with a single SQL query**: analyzing customer purchase data (CSV) and correlating it with their social media sentiment (JSON tweets).
+
+It showcases Monty's ability to:
+- Mount files securely with `OSAccess`
+- Query CSV files with SQL (via DuckDB)
+- Load and process JSON data
+- Call external functions in loops
+- Perform in-sandbox computations
+
+<Note>
+Data is from the [mafudge/datasets](https://github.com/mafudge/datasets) repository.
+</Note>
+
+## Why This Example is Interesting
+
+1. **Cross-format data joining**: CSV customer data must join with JSON tweets via Twitter handle - requires programmatic data wrangling
+2. **Loop-based external calls**: Sentiment analysis for each tweet happens in a loop - with JSON tool calling this would flood the context window with 50+ results
+3. **In-sandbox computation**: Averages, correlation, and aggregation happen in Python - no need for the LLM to do mental math
+4. **Variable iteration**: Different customers have different numbers of tweets - code handles this naturally
+5. **File sandboxing**: Uses `OSAccess` to mount data files, demonstrating secure file access patterns
+6. **Type checking**: Validates LLM-generated code against type stubs before execution
+
+## The Task
+
+For the top 10 customers by purchase amount:
+1. Get their Twitter handles from survey data
+2. Find their tweets in a JSON file
+3. Analyze sentiment for each tweet
+4. Calculate average sentiment per customer
+5. Return a summary correlating purchases with sentiment
+
+## File System Setup
+
+```python
+from pydantic_monty import OSAccess, MemoryFile
+
+# Read file contents from disk
+customers_csv = Path('customers/customers.csv').read_text()
+surveys_csv = Path('customers/surveys.csv').read_text()
+tweets_json = Path('tweets/tweets.json').read_text()
+
+# Create virtual filesystem with mounted files
+fs = OSAccess([
+    MemoryFile('/data/customers/customers.csv', content=customers_csv),
+    MemoryFile('/data/customers/surveys.csv', content=surveys_csv),
+    MemoryFile('/data/tweets/tweets.json', content=tweets_json),
+])
+```
+
+<Warning>
+Files are mounted at virtual paths like `/data/customers/customers.csv`. The sandbox cannot access your real filesystem - only these explicitly mounted files.
+</Warning>
+
+## External Functions
+
+### Query CSV with SQL
+
+```python
+async def query_csv(
+    filepath: PurePosixPath,
+    sql: str,
+    parameters: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Execute SQL query on a CSV file using DuckDB.
+    
+    Args:
+        filepath: Path to the CSV file in the virtual filesystem.
+        sql: SQL query to execute. The CSV data is available as a table named 'data'.
+        parameters: Optional dictionary of parameters to bind to the SQL query.
+    
+    Returns:
+        List of dictionaries, one per row, with column names as keys.
+    """
+```
+
+### Read JSON
+
+```python
+async def read_json(filepath: PurePosixPath) -> list[Any] | dict[str, Any]:
+    """Read and parse a JSON file from the virtual filesystem.
+    
+    Args:
+        filepath: Path to the JSON file in the virtual filesystem.
+    
+    Returns:
+        Parsed JSON data (list or dict).
+    """
+```
+
+### Analyze Sentiment
+
+```python
+async def analyze_sentiment(text: str) -> float:
+    """Analyze sentiment of text using simple keyword matching.
+    
+    Returns:
+        Sentiment score from -1.0 (very negative) to +1.0 (very positive).
+        A score of 0.0 indicates neutral sentiment.
+    """
+```
+
+## The Sandbox Code
+
+```python
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from type_stubs import analyze_sentiment, query_csv, read_json
+
+
+async def main():
+    # Step 1: Query top 10 customers by total purchases
+    print('getting top customers...')
+    top_customers = await query_csv(
+        filepath=Path('/data/customers/customers.csv'),
+        sql="""
+        SELECT "First", "Last", "Email", "Total Purchased" as TotalPurchased
+        FROM data
+        ORDER BY "Total Purchased"
+        DESC LIMIT 10
+        """,
+    )
+
+    # Step 2: Get their Twitter handles from the survey data
+    emails: list[str] = [c['Email'] for c in top_customers]
+    print('getting twitter handles...')
+    twitter_handles = await query_csv(
+        Path('/data/customers/surveys.csv'),
+        f"""
+        SELECT "Email", "Twitter Username" as Twitter
+        FROM data
+        WHERE "Email" IN $emails
+        """,
+        parameters={'emails': emails},
+    )
+    email_to_twitter = {row['Email']: row['Twitter'] for row in twitter_handles}
+
+    # Step 3: Load all tweets
+    tweets = await read_json(filepath=Path('/data/tweets/tweets.json'))
+    assert isinstance(tweets, list)
+
+    print(f'processing {len(top_customers)} customers...')
+
+    # Step 4: For each customer, find their tweets and analyze sentiment
+    results: list[dict[str, object]] = []
+    for customer in top_customers:
+        twitter = email_to_twitter.get(customer['Email'])
+        if not twitter:
+            continue
+
+        # Find tweets by this user
+        user_tweets = [t for t in tweets if t['user'] == twitter]
+        if not user_tweets:
+            continue
+
+        # Analyze sentiment of each tweet
+        sentiments: list[float] = []
+        for tweet in user_tweets:
+            score = await analyze_sentiment(text=tweet['text'])
+            sentiments.append(score)
+
+        # Calculate average sentiment
+        avg_sentiment = sum(sentiments) / len(sentiments)
+        print(f'{customer["First"]} {customer["Last"]} - {avg_sentiment=}')
+
+        results.append({
+            'name': f'{customer["First"]} {customer["Last"]}',
+            'total_purchases': customer['TotalPurchased'],
+            'twitter': twitter,
+            'tweet_count': len(user_tweets),
+            'avg_sentiment': round(avg_sentiment, 2),
+        })
+        return results
+
+
+# Return the analysis results
+await main()  # pyright: ignore
+```
+
+## Execution
+
+```python
+import pydantic_monty
+from external_functions import ExternalFunctions
+
+# Create external functions that can access the filesystem
+external_funcs = ExternalFunctions(fs)
+
+# Create the Monty runner with type checking enabled
+m = pydantic_monty.Monty(
+    SANDBOX_CODE_PATH.read_text(),
+    script_name='sql_playground.py',
+    type_check=True,
+    type_check_stubs=TYPE_STUBS,
+)
+
+# Run the analysis with external functions and OS access
+results = await pydantic_monty.run_monty_async(
+    m,
+    external_functions={
+        'query_csv': external_funcs.query_csv,
+        'read_json': external_funcs.read_json,
+        'analyze_sentiment': external_funcs.analyze_sentiment,
+    },
+    os=fs,
+)
+```
+
+## Example Output
+
+```
+getting top customers...
+getting twitter handles...
+processing 10 customers...
+John Smith - avg_sentiment=0.6
+Jane Doe - avg_sentiment=-0.3
+...
+```
+
+Final results:
+
+```python
+[
+    {
+        'name': 'John Smith',
+        'total_purchases': 12500,
+        'twitter': '@jsmith',
+        'tweet_count': 15,
+        'avg_sentiment': 0.6  # 😊
+    },
+    {
+        'name': 'Jane Doe',
+        'total_purchases': 11800,
+        'twitter': '@janedoe',
+        'tweet_count': 8,
+        'avg_sentiment': -0.3  # 😞
+    },
+    ...
+]
+```
+
+## Key Patterns
+
+<Steps>
+  <Step title="SQL for Structured Queries">
+    Use `query_csv()` for operations SQL excels at: filtering, sorting, joining CSV data.
+  </Step>
+  
+  <Step title="Python for Complex Logic">
+    Use loops and conditionals for tasks SQL can't handle: cross-format joins, variable iteration, external API calls.
+  </Step>
+  
+  <Step title="In-Loop External Calls">
+    Analyze sentiment for each tweet in a loop. With traditional tool calling, this would create 50+ function call results in the context.
+  </Step>
+  
+  <Step title="In-Sandbox Aggregation">
+    Calculate averages and build result dictionaries in Python. The LLM doesn't see intermediate data.
+  </Step>
+</Steps>
+
+## Security: File Mounting
+
+```python
+fs = OSAccess([
+    MemoryFile('/data/customers/customers.csv', content=customers_csv),
+    MemoryFile('/data/customers/surveys.csv', content=surveys_csv),
+    MemoryFile('/data/tweets/tweets.json', content=tweets_json),
+])
+```
+
+<Note>
+- The sandbox sees files at `/data/customers/customers.csv`, not your real filesystem
+- You explicitly choose which files to mount
+- Paths are always POSIX-style (forward slashes) even on Windows
+- Files are read-only by default
+</Note>
+
+## Running the Example
+
+```bash
+# Clone the mafudge datasets repository
+git clone https://github.com/mafudge/datasets mafudge_datasets
+
+# Run the example
+uv run python examples/sql_playground/main.py
+```
+
+## Type Stubs for SQL Functions
+
+```python
+from pathlib import PurePosixPath
+from typing import Any
+
+async def query_csv(
+    filepath: PurePosixPath,
+    sql: str,
+    parameters: dict[str, Any] | None = None
+) -> list[dict[str, Any]]:
+    """Execute SQL query on a CSV file using DuckDB.
+    
+    The CSV data is available as a table named 'data'.
+    """
+    ...
+
+async def read_json(filepath: PurePosixPath) -> list[Any] | dict[str, Any]:
+    """Read and parse a JSON file from the virtual filesystem."""
+    ...
+
+async def analyze_sentiment(text: str) -> float:
+    """Analyze sentiment of text.
+    
+    Returns score from -1.0 (negative) to +1.0 (positive).
+    """
+    ...
+```
+
+## Why Not Just SQL?
+
+This task **cannot** be solved with SQL alone because:
+
+1. **Cross-format joins**: CSV and JSON require different parsers
+2. **External API calls**: Sentiment analysis is an external function, not SQL
+3. **Variable iteration**: Each customer has a different number of tweets
+4. **Complex aggregation**: Calculating per-customer sentiment averages requires loops
+
+With Monty, you use SQL where it excels (structured queries) and Python where SQL falls short (loops, conditionals, external calls).
+
+## Next Steps
+
+- Explore the full source in `examples/sql_playground/`
+- Try [Web Scraper](/examples/web-scraper) for browser automation
+- See [Data Analysis](/examples/data-analysis) for async patterns without file mounting

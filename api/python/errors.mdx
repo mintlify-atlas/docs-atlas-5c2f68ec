@@ -1,0 +1,399 @@
+---
+title: Errors
+description: Exception types raised by Monty during parsing and execution
+---
+
+Monty provides a hierarchy of exception classes for different types of errors that can occur during code parsing, type checking, and execution.
+
+## Exception Hierarchy
+
+```
+MontyError (base exception)
+├── MontySyntaxError
+├── MontyTypingError
+└── MontyRuntimeError
+```
+
+## MontyError
+
+Base exception for all Monty interpreter errors. Catching `MontyError` will catch syntax, runtime, and typing errors from Monty. This exception is raised internally by Monty and cannot be constructed directly.
+
+### Methods
+
+#### exception()
+
+```python
+def exception(self) -> BaseException
+```
+
+Returns the inner exception as a Python exception object.
+
+<ResponseField type="BaseException">
+  The underlying Python exception
+</ResponseField>
+
+#### \_\_str\_\_()
+
+```python
+def __str__(self) -> str
+```
+
+Returns the exception message.
+
+<ResponseField type="str">
+  The exception message string
+</ResponseField>
+
+### Example
+
+```python
+import pydantic_monty
+
+try:
+    m = pydantic_monty.Monty('invalid syntax [')
+except pydantic_monty.MontyError as e:
+    print(f"Monty error: {e}")
+    inner = e.exception()
+    print(f"Inner exception type: {type(inner).__name__}")
+```
+
+## MontySyntaxError
+
+Raised when Python code has syntax errors or cannot be parsed by Monty.
+
+Inherits `exception()` and `__str__()` from `MontyError`.
+
+### Methods
+
+#### display()
+
+```python
+def display(self, format: Literal['type-msg', 'msg'] = 'msg') -> str
+```
+
+Returns formatted exception string.
+
+<ParamField path="format" type="Literal['type-msg', 'msg']" default="'msg'">
+  - `'type-msg'`: Returns `'ExceptionType: message'` format
+  - `'msg'`: Returns just the message
+</ParamField>
+
+<ResponseField type="str">
+  Formatted error message
+</ResponseField>
+
+### Example
+
+```python
+import pydantic_monty
+
+try:
+    m = pydantic_monty.Monty('def broken(')
+except pydantic_monty.MontySyntaxError as e:
+    print(e.display(format='type-msg'))
+    # Output: SyntaxError: Expected ')', found end of file
+    
+    print(e.display(format='msg'))
+    # Output: Expected ')', found end of file
+```
+
+## MontyTypingError
+
+Raised when type checking finds errors in the code. This exception is raised when static type analysis detects type errors before execution.
+
+Inherits `exception()` and `__str__()` from `MontyError`. Cannot be constructed directly from Python.
+
+### Methods
+
+#### display()
+
+```python
+def display(
+    self,
+    format: Literal[
+        'full', 'concise', 'azure', 'json', 'jsonlines',
+        'rdjson', 'pylint', 'gitlab', 'github'
+    ] = 'full',
+    color: bool = False,
+) -> str
+```
+
+Renders the type error diagnostics with the specified format and color.
+
+<ParamField path="format" type="Literal['full', 'concise', 'azure', 'json', 'jsonlines', 'rdjson', 'pylint', 'gitlab', 'github']" default="'full'">
+  Output format for the diagnostics:
+  - `'full'`: Complete diagnostic output with context
+  - `'concise'`: Abbreviated diagnostic output
+  - `'azure'`: Azure Pipelines format
+  - `'json'`: JSON format
+  - `'jsonlines'`: JSON Lines format
+  - `'rdjson'`: Reviewdog JSON format
+  - `'pylint'`: Pylint format
+  - `'gitlab'`: GitLab CI format
+  - `'github'`: GitHub Actions format
+</ParamField>
+
+<ParamField path="color" type="bool" default="False">
+  Whether to include ANSI color codes in the output
+</ParamField>
+
+<ResponseField type="str">
+  Formatted type error diagnostics
+</ResponseField>
+
+### Example
+
+```python
+import pydantic_monty
+
+code = """
+def add(x: int, y: int) -> int:
+    return x + y
+
+result: str = add(1, 2)
+"""
+
+try:
+    m = pydantic_monty.Monty(code, type_check=True)
+except pydantic_monty.MontyTypingError as e:
+    # Full format with color
+    print(e.display(format='full', color=True))
+    
+    # Concise format without color
+    print(e.display(format='concise', color=False))
+    
+    # JSON format for tooling
+    import json
+    diagnostics = json.loads(e.display(format='json'))
+    print(diagnostics)
+```
+
+## MontyRuntimeError
+
+Raised when Monty code fails during execution.
+
+Inherits `exception()` and `__str__()` from `MontyError`. Additionally provides `traceback()` and `display()` methods.
+
+### Methods
+
+#### traceback()
+
+```python
+def traceback(self) -> list[Frame]
+```
+
+Returns the Monty traceback as a list of Frame objects.
+
+<ResponseField type="list[Frame]">
+  List of stack frames showing the call stack at the time of the error
+</ResponseField>
+
+#### display()
+
+```python
+def display(
+    self,
+    format: Literal['traceback', 'type-msg', 'msg'] = 'traceback'
+) -> str
+```
+
+Returns formatted exception string.
+
+<ParamField path="format" type="Literal['traceback', 'type-msg', 'msg']" default="'traceback'">
+  - `'traceback'`: Full traceback with exception
+  - `'type-msg'`: `'ExceptionType: message'` format
+  - `'msg'`: Just the message
+</ParamField>
+
+<ResponseField type="str">
+  Formatted error output
+</ResponseField>
+
+### Example
+
+```python
+import pydantic_monty
+
+code = """
+def divide(a, b):
+    return a / b
+
+result = divide(10, 0)
+"""
+
+m = pydantic_monty.Monty(code)
+
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    # Display full traceback
+    print(e.display(format='traceback'))
+    # Output:
+    # Traceback (most recent call last):
+    #   File "main.py", line 5, in <module>
+    #     result = divide(10, 0)
+    #   File "main.py", line 2, in divide
+    #     return a / b
+    # ZeroDivisionError: division by zero
+    
+    # Display just type and message
+    print(e.display(format='type-msg'))
+    # Output: ZeroDivisionError: division by zero
+    
+    # Get programmatic access to traceback
+    frames = e.traceback()
+    for frame in frames:
+        print(f"{frame.filename}:{frame.line} in {frame.function_name}")
+```
+
+## Frame
+
+A single frame in a Monty traceback. This class provides detailed information about a specific point in the call stack.
+
+### Properties
+
+<ResponseField name="filename" type="str">
+  The filename where the code is located
+</ResponseField>
+
+<ResponseField name="line" type="int">
+  Line number (1-based)
+</ResponseField>
+
+<ResponseField name="column" type="int">
+  Column number (1-based)
+</ResponseField>
+
+<ResponseField name="end_line" type="int">
+  End line number (1-based)
+</ResponseField>
+
+<ResponseField name="end_column" type="int">
+  End column number (1-based)
+</ResponseField>
+
+<ResponseField name="function_name" type="str | None">
+  The name of the function, or `None` for module-level code
+</ResponseField>
+
+<ResponseField name="source_line" type="str | None">
+  The source code line for preview in the traceback
+</ResponseField>
+
+### Methods
+
+#### dict()
+
+```python
+def dict(self) -> dict[str, int | str | None]
+```
+
+Returns a dictionary of all frame attributes.
+
+<ResponseField type="dict[str, int | str | None]">
+  Dictionary containing all frame properties
+</ResponseField>
+
+### Example
+
+```python
+import pydantic_monty
+
+code = """
+def outer():
+    inner()
+
+def inner():
+    raise ValueError('Something went wrong')
+
+outer()
+"""
+
+m = pydantic_monty.Monty(code)
+
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    frames = e.traceback()
+    
+    for frame in frames:
+        print(f"File: {frame.filename}")
+        print(f"Line: {frame.line}, Column: {frame.column}")
+        print(f"Function: {frame.function_name}")
+        print(f"Source: {frame.source_line}")
+        print(f"Dict: {frame.dict()}")
+        print("---")
+```
+
+## Error Handling Best Practices
+
+### Catch Specific Exceptions
+
+```python
+import pydantic_monty
+
+code = "x = 1 / 0"
+
+try:
+    m = pydantic_monty.Monty(code)
+    result = m.run()
+except pydantic_monty.MontySyntaxError as e:
+    print(f"Syntax error: {e}")
+except pydantic_monty.MontyTypingError as e:
+    print(f"Type error: {e.display()}")
+except pydantic_monty.MontyRuntimeError as e:
+    print(f"Runtime error: {e.display(format='type-msg')}")
+except pydantic_monty.MontyError as e:
+    print(f"Other Monty error: {e}")
+```
+
+### Handle Resource Limit Errors
+
+```python
+import pydantic_monty
+
+code = "while True: pass"
+m = pydantic_monty.Monty(code)
+limits = pydantic_monty.ResourceLimits(max_duration_secs=0.1)
+
+try:
+    m.run(limits=limits)
+except pydantic_monty.MontyRuntimeError as e:
+    if "resource limit" in str(e).lower():
+        print("Execution exceeded resource limits")
+    else:
+        print(f"Other runtime error: {e}")
+```
+
+### Extract Detailed Information
+
+```python
+import pydantic_monty
+
+code = """
+def problematic_function():
+    x = undefined_variable
+
+problematic_function()
+"""
+
+m = pydantic_monty.Monty(code)
+
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    # Get the inner Python exception
+    inner_exc = e.exception()
+    print(f"Exception type: {type(inner_exc).__name__}")
+    
+    # Analyze the traceback
+    frames = e.traceback()
+    error_location = frames[-1]  # Last frame is where error occurred
+    print(f"Error at {error_location.filename}:{error_location.line}")
+    print(f"In function: {error_location.function_name}")
+```
+
+## Related
+
+- [Monty class](/api/python/monty) - Main class that raises these exceptions
+- [ResourceLimits](/api/python/resource-limits) - Configure limits to prevent resource exhaustion

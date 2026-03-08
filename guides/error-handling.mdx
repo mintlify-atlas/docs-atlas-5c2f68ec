@@ -1,0 +1,550 @@
+---
+title: Error Handling
+description: Understand and handle exceptions, tracebacks, and errors in Monty code
+---
+
+Monty provides comprehensive error handling with detailed tracebacks, exception type preservation, and multiple error display formats.
+
+## Error Types
+
+Monty has three main error types, all subclasses of `MontyError`:
+
+### MontySyntaxError
+
+Raised when code has syntax errors during parsing:
+
+```python
+import pydantic_monty
+
+try:
+    m = pydantic_monty.Monty('def')  # Invalid syntax
+except pydantic_monty.MontySyntaxError as e:
+    print(str(e))  # "Expected an identifier at byte range 3..3"
+    inner = e.exception()
+    print(type(inner))  # <class 'SyntaxError'>
+```
+
+### MontyRuntimeError
+
+Raised when code encounters a runtime error during execution:
+
+```python
+try:
+    m = pydantic_monty.Monty('1 / 0')
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    inner = e.exception()
+    print(type(inner))  # <class 'ZeroDivisionError'>
+```
+
+### MontyTypingError
+
+Raised when type checking detects type errors:
+
+```python
+try:
+    m = pydantic_monty.Monty('"hello" + 1', type_check=True)
+except pydantic_monty.MontyTypingError as e:
+    print(e.display('concise'))
+```
+
+<Info>
+  All Monty errors inherit from `MontyError`, so you can catch all Monty-specific errors with a single except clause.
+</Info>
+
+## Catching All Monty Errors
+
+```python
+import pydantic_monty
+
+try:
+    m = pydantic_monty.Monty(code, type_check=True)
+    result = m.run()
+except pydantic_monty.MontyError as e:
+    # Handles all Monty error types
+    print(f"Error: {e}")
+```
+
+## Getting the Inner Exception
+
+For `MontySyntaxError` and `MontyRuntimeError`, you can access the underlying Python exception:
+
+```python
+try:
+    m = pydantic_monty.Monty('undefined_variable')
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    inner = e.exception()
+    print(type(inner))  # <class 'NameError'>
+    print(str(inner))   # "name 'undefined_variable' is not defined"
+    print(isinstance(inner, NameError))  # True
+```
+
+## Common Runtime Exceptions
+
+Monty preserves standard Python exception types:
+
+<Tabs>
+  <Tab title="ZeroDivisionError">
+    ```python
+    m = pydantic_monty.Monty('1 / 0')
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        assert isinstance(e.exception(), ZeroDivisionError)
+    ```
+  </Tab>
+
+  <Tab title="ValueError">
+    ```python
+    m = pydantic_monty.Monty("raise ValueError('bad value')")
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        inner = e.exception()
+        assert isinstance(inner, ValueError)
+        assert str(inner) == 'bad value'
+    ```
+  </Tab>
+
+  <Tab title="TypeError">
+    ```python
+    m = pydantic_monty.Monty("'string' + 1")
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        assert isinstance(e.exception(), TypeError)
+    ```
+  </Tab>
+
+  <Tab title="IndexError">
+    ```python
+    m = pydantic_monty.Monty('[1, 2, 3][10]')
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        assert isinstance(e.exception(), IndexError)
+    ```
+  </Tab>
+
+  <Tab title="KeyError">
+    ```python
+    m = pydantic_monty.Monty("{'a': 1}['b']")
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        assert isinstance(e.exception(), KeyError)
+    ```
+  </Tab>
+
+  <Tab title="NameError">
+    ```python
+    m = pydantic_monty.Monty('undefined_variable')
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        assert isinstance(e.exception(), NameError)
+    ```
+  </Tab>
+
+  <Tab title="AssertionError">
+    ```python
+    m = pydantic_monty.Monty("assert False, 'failed'")
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        inner = e.exception()
+        assert isinstance(inner, AssertionError)
+        assert str(inner) == 'failed'
+    ```
+  </Tab>
+</Tabs>
+
+## Tracebacks
+
+Monty provides full traceback information for runtime errors:
+
+```python
+code = """
+def inner():
+    raise ValueError('error')
+
+def outer():
+    inner()
+
+outer()
+"""
+
+m = pydantic_monty.Monty(code)
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    print(e.display())
+```
+
+Output:
+
+```
+Traceback (most recent call last):
+  File "main.py", line 7, in <module>
+    outer()
+    ~~~~~~~
+  File "main.py", line 5, in outer
+    inner()
+    ~~~~~~~
+  File "main.py", line 2, in inner
+    raise ValueError('error')
+ValueError: error
+```
+
+### Accessing Traceback Frames
+
+You can access individual traceback frames programmatically:
+
+```python
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    frames = e.traceback()
+    for frame in frames:
+        print(f"{frame.filename}:{frame.line} in {frame.function_name}")
+        print(f"  {frame.source_line}")
+```
+
+### Frame Properties
+
+Each frame has these properties:
+
+```python
+frame.filename       # 'main.py'
+frame.line          # Line number (1-indexed)
+frame.column        # Column number (1-indexed)
+frame.end_line      # End line number
+frame.end_column    # End column number
+frame.function_name # Function name or '<module>'
+frame.source_line   # The actual source code line
+```
+
+You can also get frame data as a dict:
+
+```python
+frame_dict = frame.dict()
+# {
+#     'filename': 'main.py',
+#     'line': 5,
+#     'column': 1,
+#     'end_line': 5,
+#     'end_column': 6,
+#     'function_name': '<module>',
+#     'source_line': 'foo()'
+# }
+```
+
+## Display Formats
+
+Control how errors are displayed:
+
+### Full Traceback (Default)
+
+```python
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    print(e.display())  # Full traceback with frames
+    # or
+    print(e)  # Same as display()
+```
+
+### Type and Message
+
+```python
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    print(e.display('type-msg'))  # "ValueError: bad value"
+```
+
+### Message Only
+
+```python
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    print(e.display('msg'))  # "bad value"
+```
+
+<Note>
+  `str(error)` returns the same as `error.display('type-msg')` for easy printing.
+</Note>
+
+## JavaScript Error Handling
+
+```typescript
+import { Monty, MontySyntaxError, MontyRuntimeError, MontyTypingError } from '@pydantic/monty'
+
+try {
+  const m = new Monty('1 / 0')
+  m.run()
+} catch (error) {
+  if (error instanceof MontySyntaxError) {
+    console.log('Syntax error:', error.message)
+  } else if (error instanceof MontyRuntimeError) {
+    console.log('Runtime error:', error.message)
+    console.log('Traceback:', error.traceback())
+  } else if (error instanceof MontyTypingError) {
+    console.log('Type error:', error.displayDiagnostics())
+  }
+}
+```
+
+## Exception Handling Within Monty Code
+
+Monty code can catch and handle exceptions using try/except:
+
+```python
+code = """
+try:
+    1 / 0
+except ZeroDivisionError as e:
+    result = 'caught'
+result
+"""
+
+m = pydantic_monty.Monty(code)
+print(m.run())  # 'caught'
+```
+
+### Exception Hierarchies
+
+Monty respects Python exception hierarchies:
+
+```python
+code = """
+try:
+    raise ZeroDivisionError('math error')
+except ArithmeticError:  # Parent class catches child
+    caught = 'parent'
+except ZeroDivisionError:
+    caught = 'child'
+caught
+"""
+
+m = pydantic_monty.Monty(code)
+print(m.run())  # 'parent'
+```
+
+Supported exception hierarchies:
+
+- `ArithmeticError` → `ZeroDivisionError`, `OverflowError`
+- `LookupError` → `KeyError`, `IndexError`
+- `RuntimeError` → `NotImplementedError`, `RecursionError`
+
+## Exceptions from External Functions
+
+Exceptions raised by external functions propagate to Monty code:
+
+```python
+def fail():
+    raise ValueError('external error')
+
+code = """
+try:
+    fail()
+except ValueError:
+    caught = True
+caught
+"""
+
+m = pydantic_monty.Monty(code)
+result = m.run(external_functions={'fail': fail})
+print(result)  # True
+```
+
+<Info>
+  Exception types are preserved across the boundary. A `ValueError` raised by an external function is a `ValueError` in Monty code.
+</Info>
+
+### Uncaught External Exceptions
+
+If Monty code doesn't catch an exception from an external function, it propagates to the host:
+
+```python
+def fail():
+    raise RuntimeError('uncaught')
+
+m = pydantic_monty.Monty('fail()')
+
+try:
+    m.run(external_functions={'fail': fail})
+except pydantic_monty.MontyRuntimeError as e:
+    inner = e.exception()
+    print(type(inner))  # <class 'RuntimeError'>
+    print(str(inner))   # 'uncaught'
+```
+
+## Exceptions During Iterative Execution
+
+You can resume execution with an exception:
+
+```python
+code = """
+try:
+    result = external_func()
+except ValueError:
+    caught = True
+caught
+"""
+
+m = pydantic_monty.Monty(code)
+progress = m.start()
+
+# Resume with an exception instead of a return value
+result = progress.resume(exception=ValueError('test error'))
+print(result.output)  # True
+```
+
+### Uncaught Exception in Resume
+
+```python
+code = 'external_func()'
+m = pydantic_monty.Monty(code)
+progress = m.start()
+
+try:
+    # Exception not caught by Monty code
+    progress.resume(exception=ValueError('uncaught'))
+except pydantic_monty.MontyRuntimeError as e:
+    inner = e.exception()
+    print(type(inner))  # <class 'ValueError'>
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Catch specific errors first">
+    Handle specific errors before catching general `MontyError`:
+    
+    ```python
+    try:
+        m.run()
+    except pydantic_monty.MontySyntaxError:
+        # Handle syntax errors
+        pass
+    except pydantic_monty.MontyRuntimeError:
+        # Handle runtime errors
+        pass
+    except pydantic_monty.MontyError:
+        # Catch-all for other Monty errors
+        pass
+    ```
+  </Step>
+
+  <Step title="Log tracebacks for debugging">
+    Always log the full traceback for runtime errors:
+    
+    ```python
+    try:
+        m.run()
+    except pydantic_monty.MontyRuntimeError as e:
+        logger.error(f"Runtime error: {e.display()}")
+    ```
+  </Step>
+
+  <Step title="Provide helpful error messages">
+    When raising exceptions from external functions, provide clear messages:
+    
+    ```python
+    def fetch_data(url: str):
+        if not url.startswith('https://'):
+            raise ValueError(f"URL must use HTTPS: {url}")
+        # ...
+    ```
+  </Step>
+
+  <Step title="Handle errors in Monty code when possible">
+    Encourage your agent to use try/except in generated code:
+    
+    ```python
+    code = """
+    try:
+        result = risky_operation()
+    except ValueError as e:
+        result = default_value
+    result
+    """
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Always catch `MontyError` or its subclasses. Don't let Monty exceptions crash your application.
+</Warning>
+
+## Error Messages for LLMs
+
+When providing error feedback to LLMs, use concise formats:
+
+```python
+try:
+    m = pydantic_monty.Monty(llm_generated_code, type_check=True)
+    result = m.run()
+except pydantic_monty.MontyTypingError as e:
+    # Send concise type error back to LLM
+    feedback = e.display('concise')
+    print(f"Type error: {feedback}")
+except pydantic_monty.MontyRuntimeError as e:
+    # Send type and message back to LLM
+    feedback = e.display('type-msg')
+    print(f"Runtime error: {feedback}")
+```
+
+## Testing Error Handling
+
+Test that your code handles errors correctly:
+
+```python
+import pytest
+import pydantic_monty
+
+def test_handles_zero_division():
+    m = pydantic_monty.Monty('1 / 0')
+    
+    with pytest.raises(pydantic_monty.MontyRuntimeError) as exc_info:
+        m.run()
+    
+    inner = exc_info.value.exception()
+    assert isinstance(inner, ZeroDivisionError)
+
+def test_handles_missing_function():
+    m = pydantic_monty.Monty('missing_func()')
+    
+    with pytest.raises(pydantic_monty.MontyRuntimeError) as exc_info:
+        m.run()
+    
+    inner = exc_info.value.exception()
+    assert isinstance(inner, NameError)
+    assert "'missing_func'" in str(inner)
+```
+
+## Repr for Debugging
+
+All error types have helpful repr() implementations:
+
+```python
+try:
+    m.run()
+except pydantic_monty.MontyRuntimeError as e:
+    print(repr(e))
+    # MontyRuntimeError(ValueError: test message)
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Type Checking" icon="check" href="/guides/type-checking">
+    Catch errors before runtime with type checking
+  </Card>
+  <Card title="External Functions" icon="plug" href="/guides/external-functions">
+    Learn how external function errors propagate
+  </Card>
+</CardGroup>

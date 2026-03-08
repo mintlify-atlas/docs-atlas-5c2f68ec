@@ -1,0 +1,238 @@
+---
+title: External Functions
+description: Learn how to define and use external functions in Monty to connect your Python code with host environment capabilities
+---
+
+External functions allow your Monty code to call functions defined in the host environment. This is essential for giving your agent code access to tools, APIs, and other capabilities while maintaining security.
+
+## Basic Usage
+
+Define functions in your host code and pass them to `run()` via the `external_functions` parameter:
+
+<CodeGroup>
+```python Python
+import pydantic_monty
+
+# Code that calls an external function
+m = pydantic_monty.Monty('double(x)', inputs=['x'])
+
+# Provide the external function implementation at runtime
+result = m.run(
+    inputs={'x': 5},
+    external_functions={'double': lambda x: x * 2}
+)
+print(result)  # 10
+```
+
+```typescript JavaScript
+import { Monty } from '@pydantic/monty'
+
+const m = new Monty('add(2, 3)')
+
+const result = m.run({
+  externalFunctions: {
+    add: (a: number, b: number) => a + b
+  }
+})
+console.log(result)  // 5
+```
+</CodeGroup>
+
+## Arguments and Return Values
+
+External functions can accept both positional and keyword arguments:
+
+<Steps>
+  <Step title="Positional Arguments">
+    ```python
+    m = pydantic_monty.Monty('func(1, 2, 3)')
+    
+    def func(*args, **kwargs):
+        print(args)  # (1, 2, 3)
+        return 'ok'
+    
+    m.run(external_functions={'func': func})
+    ```
+  </Step>
+
+  <Step title="Keyword Arguments">
+    ```python
+    m = pydantic_monty.Monty('func(a=1, b="two")')
+    
+    def func(*args, **kwargs):
+        print(kwargs)  # {'a': 1, 'b': 'two'}
+        return 'ok'
+    
+    m.run(external_functions={'func': func})
+    ```
+  </Step>
+
+  <Step title="Mixed Arguments">
+    ```python
+    m = pydantic_monty.Monty('func(1, 2, x="hello", y=True)')
+    
+    def func(*args, **kwargs):
+        print(args)    # (1, 2)
+        print(kwargs)  # {'x': 'hello', 'y': True}
+        return 'ok'
+    
+    m.run(external_functions={'func': func})
+    ```
+  </Step>
+</Steps>
+
+## Complex Data Types
+
+External functions can pass and return complex Python types:
+
+```python
+m = pydantic_monty.Monty('get_data()')
+
+def get_data():
+    return {'a': [1, 2, 3], 'b': {'nested': True}}
+
+result = m.run(external_functions={'get_data': get_data})
+# Returns: {'a': [1, 2, 3], 'b': {'nested': True}}
+```
+
+<Note>
+  All data passed between Monty and external functions is automatically converted between Monty's internal representation and native Python/JavaScript types.
+</Note>
+
+## Multiple External Functions
+
+You can provide multiple external functions in a single execution:
+
+```python
+m = pydantic_monty.Monty('add(1, 2) + mul(3, 4)')
+
+def add(a, b):
+    return a + b
+
+def mul(a, b):
+    return a * b
+
+result = m.run(external_functions={'add': add, 'mul': mul})
+print(result)  # 15 (3 + 12)
+```
+
+## Function Reuse Across Calls
+
+The same function can be called multiple times during execution:
+
+```python
+m = pydantic_monty.Monty('counter() + counter() + counter()')
+
+call_count = 0
+
+def counter():
+    global call_count
+    call_count += 1
+    return call_count
+
+result = m.run(external_functions={'counter': counter})
+print(result)  # 6 (1 + 2 + 3)
+```
+
+## Error Handling
+
+Exceptions raised in external functions propagate to the Monty code:
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    m = pydantic_monty.Monty('fail()')
+    
+    def fail():
+        raise ValueError('intentional error')
+    
+    try:
+        m.run(external_functions={'fail': fail})
+    except pydantic_monty.MontyRuntimeError as e:
+        inner = e.exception()
+        print(type(inner))  # <class 'ValueError'>
+        print(inner.args[0])  # 'intentional error'
+    ```
+  </Tab>
+
+  <Tab title="JavaScript">
+    ```typescript
+    import { Monty, MontyRuntimeError } from '@pydantic/monty'
+    
+    const m = new Monty('1 / 0')
+    
+    try {
+      m.run()
+    } catch (error) {
+      if (error instanceof MontyRuntimeError) {
+        console.log(error.message)
+        console.log(error.traceback())
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Catching Exceptions in Monty Code
+
+Exceptions from external functions can be caught using try/except blocks:
+
+```python
+code = """
+try:
+    fail()
+except ValueError:
+    caught = True
+caught
+"""
+
+m = pydantic_monty.Monty(code)
+
+def fail():
+    raise ValueError('caught error')
+
+result = m.run(external_functions={'fail': fail})
+print(result)  # True
+```
+
+<Info>
+  Exception types are preserved across the boundary, including exception hierarchies. For example, a `ZeroDivisionError` raised by an external function can be caught by an `ArithmeticError` handler in Monty code.
+</Info>
+
+## Missing Functions
+
+If Monty code calls a function that isn't provided, a `NameError` is raised:
+
+```python
+m = pydantic_monty.Monty('missing()')
+
+try:
+    m.run()  # No external_functions provided
+except pydantic_monty.MontyRuntimeError as e:
+    inner = e.exception()
+    print(type(inner))  # <class 'NameError'>
+    print(str(inner))   # "name 'missing' is not defined"
+```
+
+## Best Practices
+
+<Warning>
+  Only provide external functions that are safe for your agent to call. External functions run in your host environment with full access to system resources.
+</Warning>
+
+1. **Keep functions focused**: Each external function should do one thing well
+2. **Use type hints**: Help type checking catch errors early (see [Type Checking](/guides/type-checking))
+3. **Handle errors gracefully**: Return meaningful error messages that help the agent understand what went wrong
+4. **Validate inputs**: Don't trust that the agent will call functions correctly
+5. **Use async functions**: For I/O-bound operations, use async functions (see [Async Execution](/guides/async-execution))
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Iterative Execution" icon="arrows-rotate" href="/guides/iterative-execution">
+    Learn how to handle external function calls step-by-step
+  </Card>
+  <Card title="Async Execution" icon="clock" href="/guides/async-execution">
+    Use async external functions for better performance
+  </Card>
+</CardGroup>

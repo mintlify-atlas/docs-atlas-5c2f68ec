@@ -1,0 +1,249 @@
+---
+title: "MontyRun"
+description: "Primary interface for running Monty code"
+icon: "play"
+---
+
+# MontyRun
+
+Primary interface for running Monty code. `MontyRun` supports two execution modes:
+
+- **Simple execution**: Use `run()` or `run_no_limits()` to run code to completion
+- **Iterative execution**: Use `start()` to start execution which will pause at external function calls and can be resumed later
+
+## Constructor
+
+### new()
+
+Creates a new run snapshot by parsing the given code.
+
+This only parses and prepares the code - no heap or namespaces are created yet. Call `run()` with inputs to start execution.
+
+<ParamField path="code" type="String" required>
+  The Python code to execute
+</ParamField>
+
+<ParamField path="script_name" type="&str" required>
+  The script name for error messages
+</ParamField>
+
+<ParamField path="input_names" type="Vec<String>" required>
+  Names of input variables
+</ParamField>
+
+<ResponseField name="Result<MontyRun, MontyException>">
+  Returns the parsed `MontyRun` or an error if the code cannot be parsed
+</ResponseField>
+
+```rust
+use monty::{MontyRun, MontyObject};
+
+let runner = MontyRun::new(
+    "x + 1".to_owned(),
+    "test.py",
+    vec!["x".to_owned()]
+).unwrap();
+```
+
+## Execution Methods
+
+### run()
+
+Executes the code to completion assuming no external functions or snapshotting.
+
+This is marginally faster than running with snapshotting enabled since we don't need to track the position in code, but does not allow calling of external functions.
+
+<ParamField path="inputs" type="Vec<MontyObject>" required>
+  Values to fill the first N slots of the namespace
+</ParamField>
+
+<ParamField path="resource_tracker" type="impl ResourceTracker" required>
+  Custom resource tracker implementation
+</ParamField>
+
+<ParamField path="print" type="&mut PrintWriter<'_>" required>
+  Print output writer (mutably borrowed so `Collect` data is preserved)
+</ParamField>
+
+<ResponseField name="Result<MontyObject, MontyException>">
+  Returns the final result value or an error if execution fails
+</ResponseField>
+
+```rust
+use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+let runner = MontyRun::new(
+    "x + 1".to_owned(),
+    "test.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+let result = runner.run(
+    vec![MontyObject::Int(41)],
+    NoLimitTracker,
+    &mut PrintWriter::Stdout
+).unwrap();
+
+assert_eq!(result, MontyObject::Int(42));
+```
+
+### run_no_limits()
+
+Executes the code to completion with no resource limits, printing to stdout/stderr.
+
+<ParamField path="inputs" type="Vec<MontyObject>" required>
+  Values to fill the first N slots of the namespace
+</ParamField>
+
+<ResponseField name="Result<MontyObject, MontyException>">
+  Returns the final result value or an error if execution fails
+</ResponseField>
+
+```rust
+use monty::{MontyRun, MontyObject};
+
+let runner = MontyRun::new(
+    "x + 1".to_owned(),
+    "test.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+let result = runner.run_no_limits(vec![MontyObject::Int(41)]).unwrap();
+assert_eq!(result, MontyObject::Int(42));
+```
+
+### start()
+
+Starts execution with the given inputs and resource tracker, consuming self.
+
+For iterative execution, `start()` consumes self and returns a `RunProgress`:
+- `RunProgress::FunctionCall(call)` - external function call, call `call.resume(return_value)` to resume
+- `RunProgress::Complete(value)` - execution finished
+
+This enables snapshotting execution state and returning control to the host application during long-running computations.
+
+<ParamField path="inputs" type="Vec<MontyObject>" required>
+  Initial input values (must match length of `input_names` from `new()`)
+</ParamField>
+
+<ParamField path="resource_tracker" type="impl ResourceTracker" required>
+  Resource tracker for the execution
+</ParamField>
+
+<ParamField path="print" type="&mut PrintWriter<'_>" required>
+  Writer for print output
+</ParamField>
+
+<ResponseField name="Result<RunProgress<T>, MontyException>">
+  Returns a `RunProgress` enum indicating the next step in execution
+</ResponseField>
+
+**Errors:** Returns `MontyException` if:
+- The number of inputs doesn't match the expected count
+- An input value is invalid (e.g., `MontyObject::Repr`)
+- A runtime error occurs during execution
+
+```rust
+use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+let code = r#"
+def fib(n):
+    if n <= 1:
+        return n
+    return fib(n - 1) + fib(n - 2)
+
+fib(x)
+"#;
+
+let runner = MontyRun::new(
+    code.to_owned(),
+    "fib.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+let result = runner.start(
+    vec![MontyObject::Int(10)],
+    NoLimitTracker,
+    &mut PrintWriter::Stdout
+).unwrap();
+```
+
+## Serialization Methods
+
+### dump()
+
+Serializes the runner to a binary format.
+
+The serialized data can be stored and later restored with `load()`. This allows caching parsed code to avoid re-parsing on subsequent runs.
+
+<ResponseField name="Result<Vec<u8>, postcard::Error>">
+  Returns the serialized bytes or an error if serialization fails
+</ResponseField>
+
+```rust
+use monty::MontyRun;
+
+let runner = MontyRun::new(
+    "x + 1".to_owned(),
+    "test.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+let bytes = runner.dump().unwrap();
+```
+
+### load()
+
+Deserializes a runner from binary format.
+
+<ParamField path="bytes" type="&[u8]" required>
+  The serialized runner data from `dump()`
+</ParamField>
+
+<ResponseField name="Result<MontyRun, postcard::Error>">
+  Returns the deserialized `MontyRun` or an error if deserialization fails
+</ResponseField>
+
+```rust
+use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+// Serialize parsed code
+let runner = MontyRun::new(
+    "x + 1".to_owned(),
+    "main.py",
+    vec!["x".to_owned()]
+).unwrap();
+let bytes = runner.dump().unwrap();
+
+// Later, restore and run
+let runner2 = MontyRun::load(&bytes).unwrap();
+let result = runner2.run(
+    vec![MontyObject::Int(41)],
+    NoLimitTracker,
+    &mut PrintWriter::Stdout
+).unwrap();
+
+assert_eq!(result, MontyObject::Int(42));
+```
+
+## Other Methods
+
+### code()
+
+Returns the code that was parsed to create this snapshot.
+
+<ResponseField name="&str">
+  Reference to the source code string
+</ResponseField>
+
+```rust
+use monty::MontyRun;
+
+let runner = MontyRun::new(
+    "x + 1".to_owned(),
+    "test.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+assert_eq!(runner.code(), "x + 1");
+```

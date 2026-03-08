@@ -1,97 +1,119 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Monty - Secure Python Sandbox for AI Agents"
+description: "A minimal, secure Python interpreter written in Rust with microsecond startup and complete sandbox isolation"
 ---
 
-## Setting up
+<div className="bg-gradient-to-r from-[#df8d6f] to-[#848487] rounded-lg p-8 mb-8">
+  <h1 className="text-4xl font-bold text-white mb-4">Monty</h1>
+  <p className="text-xl text-white/90">A minimal, secure Python interpreter written in Rust for use by AI agents</p>
+</div>
 
-Get your documentation site up and running in minutes.
+## Why Monty?
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+Monty lets you safely run LLM-generated Python code embedded in your agent, with startup times measured in single-digit microseconds instead of hundreds of milliseconds. No containers, no complex sandboxing infrastructure — just fast, secure execution.
 
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Blazing Fast" icon="bolt">
+    Sub-microsecond startup time and performance similar to CPython
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Completely Isolated" icon="shield">
+    Zero access to filesystem, environment, or network without explicit permission
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Snapshot & Resume" icon="camera">
+    Serialize interpreter state at any point and resume execution later
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Multi-Language" icon="code">
+    Use from Python, JavaScript/TypeScript, or Rust
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Get Started
 
-Everything you need to create world-class documentation.
+<CardGroup cols={3}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install Monty for Python, JavaScript, or Rust
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Run your first sandboxed Python code in minutes
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/security">
+    Understand Monty's security model and design
+  </Card>
+</CardGroup>
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+## Key Features
 
-## Need inspiration?
+<AccordionGroup>
+  <Accordion title="Sandboxed Execution">
+    Run untrusted Python code with strict security guarantees. Filesystem, network access, and environment variables are all implemented via external function calls you control.
+  </Accordion>
+  <Accordion title="External Functions">
+    Call host functions from sandboxed code. Only functions you explicitly provide are accessible, giving you complete control over I/O operations.
+  </Accordion>
+  <Accordion title="Type Checking">
+    Built-in type checking with ty (from Astral/Ruff) included in a single binary. Catch type errors before execution.
+  </Accordion>
+  <Accordion title="Resource Limits">
+    Track and limit memory usage, allocations, stack depth, and execution time. Cancel execution if it exceeds preset limits.
+  </Accordion>
+  <Accordion title="Async Support">
+    Run async or sync code on the host via async or sync code in the sandbox. Full asyncio support included.
+  </Accordion>
+</AccordionGroup>
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
+## Use Cases
+
+Monty is designed for one specific use case: **running code written by AI agents**.
+
+<CardGroup cols={2}>
+  <Card title="Agent Code Mode" icon="robot" href="/examples/agent-code-mode">
+    Let LLMs write Python code instead of using traditional tool calling
+  </Card>
+  <Card title="Pydantic AI Integration" icon="link" href="/examples/pydantic-ai">
+    Use Monty with Pydantic AI for code-mode execution
+  </Card>
+  <Card title="Web Scraping" icon="globe" href="/examples/web-scraper">
+    Safely run LLM-generated web scraping scripts
+  </Card>
+  <Card title="Data Analysis" icon="chart-line" href="/examples/data-analysis">
+    Execute data analysis code written by AI agents
+  </Card>
+</CardGroup>
+
+## Example
+
+```python
+from typing import Any
+import pydantic_monty
+
+code = """
+async def agent(prompt: str, messages: Messages):
+    while True:
+        output = await call_llm(prompt, messages)
+        if isinstance(output, str):
+            return output
+        messages.extend(output)
+
+await agent(prompt, [])
+"""
+
+m = pydantic_monty.Monty(code, inputs=['prompt'], type_check=True)
+
+async def call_llm(prompt: str, messages: list[dict[str, Any]]) -> str | list[dict[str, Any]]:
+    if len(messages) < 2:
+        return [{'role': 'system', 'content': 'example response'}]
+    else:
+        return f'example output, message count {len(messages)}'
+
+async def main():
+    output = await pydantic_monty.run_monty_async(
+        m,
+        inputs={'prompt': 'testing'},
+        external_functions={'call_llm': call_llm},
+    )
+    print(output)  # "example output, message count 2"
+```
+
+<Card title="View Full API Reference" icon="code" href="/api/python/monty">
+  Explore the complete API for Python, JavaScript, and Rust
 </Card>

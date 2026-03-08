@@ -1,0 +1,128 @@
+---
+title: Agent Code Mode
+description: Why LLMs writing code is better than traditional tool calling
+---
+
+## What is Agent Code Mode?
+
+Agent Code Mode is a pattern where LLMs write Python code to accomplish tasks instead of making sequential tool calls. The LLM generates code that calls your tools as functions, and Monty executes it safely in a sandboxed environment.
+
+<Note>
+This approach is faster, cheaper, and more reliable than traditional tool calling because:
+- The LLM can express complex logic in code instead of chained tool calls
+- Multiple operations can run in parallel with `asyncio.gather`
+- Intermediate results stay in the sandbox, reducing token usage
+- Type checking catches errors before execution
+</Note>
+
+## Why Code Mode?
+
+Instead of asking an LLM to make 50 sequential tool calls to process a list, you can ask it to write a loop. The LLM naturally expresses:
+- Loops and iteration
+- Conditional logic
+- Data transformations
+- Parallel execution
+- Error handling
+
+Monty makes this safe by providing a minimal, secure Python interpreter that:
+- Blocks filesystem, network, and environment access
+- Only allows calling functions you explicitly provide
+- Enforces resource limits (memory, time, stack depth)
+- Starts in microseconds, not milliseconds
+
+## How It Works
+
+<Steps>
+  <Step title="LLM Generates Code">
+    Ask the LLM to write Python code that uses your tools as functions. The code can include loops, conditionals, async/await, and more.
+  </Step>
+  
+  <Step title="Type Check">
+    Monty validates the generated code against type stubs you provide, catching errors before execution.
+  </Step>
+  
+  <Step title="Safe Execution">
+    The code runs in Monty's sandboxed interpreter. When it calls external functions, Monty pauses and hands control back to you.
+  </Step>
+  
+  <Step title="Resume & Return">
+    You execute the function call in your host environment and resume Monty with the result. This repeats until the code completes.
+  </Step>
+</Steps>
+
+## Example: Iterative Execution
+
+```python
+import pydantic_monty
+
+code = """
+data = fetch(url)
+len(data)
+"""
+
+m = pydantic_monty.Monty(code, inputs=['url'])
+
+# Start execution - pauses when fetch() is called
+result = m.start(inputs={'url': 'https://example.com'})
+
+print(type(result))
+#> <class 'pydantic_monty.FunctionSnapshot'>
+print(result.function_name)  # fetch
+#> fetch
+print(result.args)
+#> ('https://example.com',)
+
+# Perform the actual fetch, then resume with the result
+result = result.resume(return_value='hello world')
+
+print(type(result))
+#> <class 'pydantic_monty.MontyComplete'>
+print(result.output)
+#> 11
+```
+
+## Example: Async External Functions
+
+For async functions, use `run_monty_async()` which handles the pause/resume loop automatically:
+
+```python
+import pydantic_monty
+
+code = """
+result = await fetch_data(url)
+result['count']
+"""
+
+m = pydantic_monty.Monty(code, inputs=['url'])
+
+async def fetch_data(url: str) -> dict:
+    # Your async logic here
+    return {'count': 42}
+
+output = await pydantic_monty.run_monty_async(
+    m,
+    inputs={'url': 'https://api.example.com'},
+    external_functions={'fetch_data': fetch_data}
+)
+print(output)  # 42
+```
+
+## Learn More
+
+For deeper context on why this pattern is valuable, see:
+
+- [Codemode](https://blog.cloudflare.com/code-mode/) from Cloudflare
+- [Programmatic Tool Calling](https://platform.claude.com/docs/en/agents-and-tools/tool-use/programmatic-tool-calling) from Anthropic
+- [Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp) from Anthropic
+- [Smol Agents](https://github.com/huggingface/smolagents) from Hugging Face
+
+<Note>
+Monty is designed for this single use case: running code written by agents safely and efficiently.
+</Note>
+
+## Next Steps
+
+Explore the example implementations:
+- [Web Scraper](/examples/web-scraper) - Extract structured data from websites
+- [Data Analysis](/examples/data-analysis) - Analyze expenses with async tool calls
+- [SQL Playground](/examples/sql-playground) - Query CSV files and analyze sentiment

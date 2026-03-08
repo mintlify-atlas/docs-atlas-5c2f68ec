@@ -1,0 +1,300 @@
+---
+title: "Monty Class"
+description: "Core Monty interpreter class for parsing and executing Python code"
+---
+
+## Overview
+
+The `Monty` class is the main entry point for executing sandboxed Python code in JavaScript/TypeScript. It parses Python code and provides methods to execute it with configurable inputs, external functions, and resource limits.
+
+## Constructor
+
+```typescript
+new Monty(code: string, options?: MontyOptions)
+```
+
+Creates a new Monty interpreter instance by parsing the given Python code.
+
+<ParamField path="code" type="string" required>
+  The Python code to parse and prepare for execution
+</ParamField>
+
+<ParamField path="options" type="MontyOptions">
+  Optional configuration for the interpreter
+  
+  <Expandable title="MontyOptions properties">
+    <ParamField path="scriptName" type="string">
+      Name used in tracebacks and error messages (default: `'main.py'`)
+    </ParamField>
+    
+    <ParamField path="inputs" type="string[]">
+      Array of input variable names that can be provided at runtime
+    </ParamField>
+    
+    <ParamField path="typeCheck" type="boolean">
+      Enable static type checking on construction (default: `false`)
+    </ParamField>
+    
+    <ParamField path="typeCheckPrefixCode" type="string">
+      Code to prepend before type checking (e.g., type definitions)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+**Throws:**
+- `MontySyntaxError` - If the code has syntax errors
+- `MontyTypingError` - If type checking is enabled and finds errors
+
+### Example
+
+```typescript
+import { Monty } from '@pydantic/monty'
+
+// Simple expression
+const m = new Monty('1 + 2')
+
+// With inputs
+const m2 = new Monty('x + y', { 
+  inputs: ['x', 'y'],
+  scriptName: 'calculator.py'
+})
+
+// With type checking
+const m3 = new Monty('x: int = 1\nx + 1', { 
+  typeCheck: true 
+})
+```
+
+## Methods
+
+### run()
+
+```typescript
+run(options?: RunOptions): any
+```
+
+Executes the parsed Python code and returns the result of the last expression.
+
+<ParamField path="options" type="RunOptions">
+  Optional execution configuration
+  
+  <Expandable title="RunOptions properties">
+    <ParamField path="inputs" type="Record<string, any>">
+      Values for input variables declared in the constructor
+    </ParamField>
+    
+    <ParamField path="limits" type="ResourceLimits">
+      Resource limits to enforce during execution. See [Resource Limits](/api/js/resource-limits)
+    </ParamField>
+    
+    <ParamField path="externalFunctions" type="Record<string, Function>">
+      External function implementations (synchronous only - use `runMontyAsync()` for async)
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="any">
+  The result of the last expression in the Python code
+</ResponseField>
+
+**Throws:**
+- `MontyRuntimeError` - If the code raises an exception during execution
+
+**Example:**
+
+```typescript
+const m = new Monty('x * 2', { inputs: ['x'] })
+const result = m.run({ inputs: { x: 10 } }) // returns 20
+
+// With external functions
+const m2 = new Monty('add(2, 3)')
+const result2 = m2.run({
+  externalFunctions: {
+    add: (a: number, b: number) => a + b
+  }
+}) // returns 5
+```
+
+### start()
+
+```typescript
+start(options?: StartOptions): MontySnapshot | MontyNameLookup | MontyComplete
+```
+
+Starts iterative execution, pausing at external function calls or name lookups. This provides fine-grained control over execution.
+
+<ParamField path="options" type="StartOptions">
+  Same as `RunOptions` - optional execution configuration
+</ParamField>
+
+<ResponseField name="result" type="MontySnapshot | MontyNameLookup | MontyComplete">
+  - `MontySnapshot` - Execution paused at an external function call
+  - `MontyNameLookup` - Execution paused at an undefined name lookup
+  - `MontyComplete` - Execution completed successfully
+</ResponseField>
+
+**Throws:**
+- `MontyRuntimeError` - If the code raises an exception
+
+**Example:**
+
+```typescript
+const m = new Monty('a() + b()')
+
+let progress = m.start()
+while (progress instanceof MontySnapshot) {
+  console.log(`Calling: ${progress.functionName}`)
+  console.log(`Args: ${progress.args}`)
+  // Provide the return value and resume
+  progress = progress.resume({ returnValue: 10 })
+}
+// progress is now MontyComplete
+console.log(progress.output) // 20
+```
+
+### typeCheck()
+
+```typescript
+typeCheck(prefixCode?: string): void
+```
+
+Performs static type checking on the code.
+
+<ParamField path="prefixCode" type="string">
+  Optional code to prepend before type checking (e.g., type definitions)
+</ParamField>
+
+**Throws:**
+- `MontyTypingError` - If type checking finds errors
+
+**Example:**
+
+```typescript
+const m = new Monty('"hello" + 1')
+try {
+  m.typeCheck()
+} catch (error) {
+  if (error instanceof MontyTypingError) {
+    console.log(error.displayDiagnostics('concise'))
+  }
+}
+```
+
+### dump()
+
+```typescript
+dump(): Buffer
+```
+
+Serializes the Monty instance to a binary format. This allows you to save the parsed code and avoid re-parsing later.
+
+<ResponseField name="data" type="Buffer">
+  Binary representation of the Monty instance
+</ResponseField>
+
+**Example:**
+
+```typescript
+const m = new Monty('complex_code()')
+const data = m.dump()
+
+// Save to file or database
+fs.writeFileSync('monty.bin', data)
+```
+
+### load() (static)
+
+```typescript
+static load(data: Buffer): Monty
+```
+
+Deserializes a Monty instance from binary format.
+
+<ParamField path="data" type="Buffer" required>
+  Binary data from `dump()`
+</ParamField>
+
+<ResponseField name="monty" type="Monty">
+  Restored Monty instance ready to execute
+</ResponseField>
+
+**Example:**
+
+```typescript
+const data = fs.readFileSync('monty.bin')
+const m = Monty.load(data)
+const result = m.run()
+```
+
+## Properties
+
+### scriptName
+
+```typescript
+readonly scriptName: string
+```
+
+Returns the script name used in tracebacks and error messages.
+
+### inputs
+
+```typescript
+readonly inputs: string[]
+```
+
+Returns the array of declared input variable names.
+
+## Helper Function: runMontyAsync()
+
+```typescript
+async function runMontyAsync(
+  montyRunner: Monty,
+  options?: RunMontyAsyncOptions
+): Promise<any>
+```
+
+Helper function that runs a Monty script with support for both synchronous and asynchronous external functions.
+
+<ParamField path="montyRunner" type="Monty" required>
+  The Monty instance to execute
+</ParamField>
+
+<ParamField path="options" type="RunMontyAsyncOptions">
+  <Expandable title="RunMontyAsyncOptions properties">
+    <ParamField path="inputs" type="Record<string, any>">
+      Input variable values
+    </ParamField>
+    
+    <ParamField path="externalFunctions" type="Record<string, Function>">
+      External function implementations (can be sync or async)
+    </ParamField>
+    
+    <ParamField path="limits" type="ResourceLimits">
+      Resource limits to enforce
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="any">
+  The output of the Monty script
+</ResponseField>
+
+**Example:**
+
+```typescript
+import { Monty, runMontyAsync } from '@pydantic/monty'
+
+const m = new Monty('fetch_data(url)', {
+  inputs: ['url'],
+})
+
+const result = await runMontyAsync(m, {
+  inputs: { url: 'https://example.com' },
+  externalFunctions: {
+    fetch_data: async (url: string) => {
+      const response = await fetch(url)
+      return response.text()
+    },
+  },
+})
+```

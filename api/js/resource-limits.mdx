@@ -1,0 +1,233 @@
+---
+title: "Resource Limits"
+description: "Configure resource limits to sandbox Python code execution"
+---
+
+## Overview
+
+The `ResourceLimits` interface allows you to enforce limits on Python code execution to prevent resource exhaustion and ensure safe sandboxing of untrusted code.
+
+All limits are optional. Omit a field to disable that specific limit.
+
+## Interface
+
+```typescript
+interface ResourceLimits {
+  maxAllocations?: number
+  maxDurationSecs?: number
+  maxMemory?: number
+  gcInterval?: number
+  maxRecursionDepth?: number
+}
+```
+
+## Fields
+
+<ParamField path="maxAllocations" type="number">
+  Maximum number of heap allocations allowed during execution.
+  
+  When this limit is reached, execution terminates with a `ResourceError`.
+  
+  Useful for preventing memory exhaustion from code that creates many objects.
+  
+  **Example:**
+  ```typescript
+  limits: { maxAllocations: 10000 }
+  ```
+</ParamField>
+
+<ParamField path="maxDurationSecs" type="number">
+  Maximum execution time in seconds (floating point).
+  
+  When this time limit is exceeded, execution terminates with a `ResourceError`.
+  
+  Useful for preventing infinite loops or long-running computations.
+  
+  **Example:**
+  ```typescript
+  limits: { maxDurationSecs: 5.0 }  // 5 seconds
+  limits: { maxDurationSecs: 0.1 }  // 100 milliseconds
+  ```
+</ParamField>
+
+<ParamField path="maxMemory" type="number">
+  Maximum heap memory in bytes.
+  
+  When heap memory usage exceeds this limit, execution terminates with a `ResourceError`.
+  
+  Useful for preventing memory exhaustion from large data structures.
+  
+  **Example:**
+  ```typescript
+  limits: { maxMemory: 1024 * 1024 }     // 1 MB
+  limits: { maxMemory: 10 * 1024 * 1024 } // 10 MB
+  ```
+</ParamField>
+
+<ParamField path="gcInterval" type="number">
+  Run garbage collection every N allocations.
+  
+  Controls how frequently the garbage collector runs. Lower values reduce peak memory usage but may slow execution. Higher values improve performance but may increase memory usage.
+  
+  If not specified, garbage collection is triggered automatically based on heap pressure.
+  
+  **Example:**
+  ```typescript
+  limits: { gcInterval: 1000 }  // GC every 1000 allocations
+  ```
+</ParamField>
+
+<ParamField path="maxRecursionDepth" type="number">
+  Maximum function call stack depth.
+  
+  **Default:** `1000`
+  
+  When the call stack exceeds this depth, execution terminates with a `RecursionError`.
+  
+  Useful for preventing stack overflow from infinite recursion.
+  
+  **Example:**
+  ```typescript
+  limits: { maxRecursionDepth: 100 }  // Shallow stack
+  limits: { maxRecursionDepth: 5000 } // Deep stack
+  ```
+</ParamField>
+
+## Usage Examples
+
+### Basic Resource Limiting
+
+```typescript
+import { Monty } from '@pydantic/monty'
+
+const m = new Monty('sum(range(1000000))')
+
+try {
+  const result = m.run({
+    limits: {
+      maxAllocations: 10000,
+      maxDurationSecs: 1,
+      maxMemory: 1024 * 1024, // 1MB
+    },
+  })
+} catch (error) {
+  if (error instanceof MontyRuntimeError) {
+    console.log('Resource limit exceeded:', error.message)
+  }
+}
+```
+
+### Preventing Infinite Recursion
+
+```typescript
+const code = `
+def infinite():
+    return infinite()
+
+infinite()
+`
+
+const m = new Monty(code)
+
+try {
+  m.run({
+    limits: {
+      maxRecursionDepth: 100,
+    },
+  })
+} catch (error) {
+  console.log('Caught recursion error')
+}
+```
+
+### Preventing Long-Running Code
+
+```typescript
+const code = `
+while True:
+    pass
+`
+
+const m = new Monty(code)
+
+try {
+  m.run({
+    limits: {
+      maxDurationSecs: 0.1, // 100ms timeout
+    },
+  })
+} catch (error) {
+  console.log('Execution timed out')
+}
+```
+
+### Combining Multiple Limits
+
+```typescript
+const m = new Monty('user_code', { inputs: ['user_code'] })
+
+const result = m.run({
+  inputs: { user_code: untrustedCode },
+  limits: {
+    maxAllocations: 50000,
+    maxDurationSecs: 2,
+    maxMemory: 5 * 1024 * 1024, // 5 MB
+    maxRecursionDepth: 200,
+    gcInterval: 5000,
+  },
+})
+```
+
+### Using with runMontyAsync()
+
+```typescript
+import { Monty, runMontyAsync } from '@pydantic/monty'
+
+const m = new Monty('process_data(data)', { inputs: ['data'] })
+
+const result = await runMontyAsync(m, {
+  inputs: { data: largeDataset },
+  limits: {
+    maxMemory: 100 * 1024 * 1024, // 100 MB
+    maxDurationSecs: 30,
+  },
+  externalFunctions: {
+    process_data: async (data) => {
+      return await expensiveProcessing(data)
+    },
+  },
+})
+```
+
+## Best Practices
+
+<Tip>
+**Always set resource limits when executing untrusted code** to prevent denial-of-service attacks and resource exhaustion.
+</Tip>
+
+<Warning>
+When a resource limit is exceeded, execution terminates immediately. The heap may contain orphaned objects with incorrect reference counts. Always discard the Monty instance after a resource limit error.
+</Warning>
+
+### Recommended Limits for Untrusted Code
+
+```typescript
+const UNTRUSTED_CODE_LIMITS: ResourceLimits = {
+  maxAllocations: 100000,
+  maxDurationSecs: 5,
+  maxMemory: 10 * 1024 * 1024, // 10 MB
+  maxRecursionDepth: 500,
+}
+
+const m = new Monty(untrustedCode)
+try {
+  const result = m.run({ limits: UNTRUSTED_CODE_LIMITS })
+} catch (error) {
+  // Handle errors
+}
+```
+
+## See Also
+
+- [Monty Class](/api/js/monty) - Main interpreter class
+- [Errors](/api/js/errors) - Error handling and exception types

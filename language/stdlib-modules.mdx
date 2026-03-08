@@ -1,0 +1,424 @@
+---
+title: Standard Library
+description: Supported Python standard library modules in Monty
+---
+
+Monty includes a small, focused subset of the Python standard library optimized for agent code execution. This page documents all supported modules and their features.
+
+## Available Modules
+
+Monty currently supports these standard library modules:
+
+- **sys** - System-specific parameters and functions
+- **os** - Operating system interface (sandboxed)
+- **typing** - Type hints and annotations
+- **asyncio** - Asynchronous programming support
+- **re** - Regular expression operations
+- **pathlib** - Object-oriented filesystem paths
+
+<Note>
+  More modules are planned: `datetime`, `dataclasses`, and `json` are coming soon.
+</Note>
+
+---
+
+## sys Module
+
+Provides system-specific parameters and functions.
+
+### Attributes
+
+<AccordionGroup>
+  <Accordion title="sys.version">
+    Python version string identifying Monty.
+
+    ```python
+    import sys
+
+    print(sys.version)
+    # Output: "3.14.0 (Monty)"
+    ```
+  </Accordion>
+
+  <Accordion title="sys.version_info">
+    Named tuple containing version information.
+
+    ```python
+    import sys
+
+    print(sys.version_info)
+    # Output: sys.version_info(major=3, minor=14, micro=0, releaselevel='final', serial=0)
+
+    if sys.version_info.major >= 3:
+        print('Python 3+')
+    ```
+  </Accordion>
+
+  <Accordion title="sys.platform">
+    Platform identifier (always `"monty"` for Monty).
+
+    ```python
+    import sys
+
+    print(sys.platform)
+    # Output: "monty"
+    ```
+  </Accordion>
+
+  <Accordion title="sys.stdout / sys.stderr">
+    Markers for standard output and error streams.
+
+    ```python
+    import sys
+
+    # These are markers, not actual file objects
+    print('Hello', file=sys.stdout)
+    print('Error', file=sys.stderr)
+    ```
+
+    <Warning>
+      These are marker objects only and don't provide full file I/O functionality.
+    </Warning>
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## os Module
+
+Provides operating system functionality in a sandboxed environment.
+
+<Warning>
+  All filesystem operations in Monty are **sandboxed** and must be explicitly enabled by the host. Direct filesystem access is blocked for security.
+</Warning>
+
+### Path Operations
+
+```python
+import os
+
+# Path manipulation (safe, no filesystem access)
+path = os.path.join('data', 'files', 'output.txt')
+basename = os.path.basename(path)
+dirname = os.path.dirname(path)
+```
+
+<Note>
+  The `os` module in Monty focuses on path operations. File I/O operations like `os.open()`, `os.read()`, and `os.write()` are controlled by the host environment.
+</Note>
+
+---
+
+## typing Module
+
+Full support for Python's type hint system.
+
+### Available Types
+
+<AccordionGroup>
+  <Accordion title="Generic Types">
+    Standard generic types for annotations.
+
+    ```python
+    from typing import List, Dict, Set, Tuple, Optional, Union
+
+    def process(items: List[str]) -> Dict[str, int]:
+        return {item: len(item) for item in items}
+
+    def find(key: str) -> Optional[str]:
+        return data.get(key)  # Returns str or None
+
+    def parse(value: Union[int, str]) -> int:
+        return int(value)
+    ```
+  </Accordion>
+
+  <Accordion title="Type Aliases">
+    Create type aliases for complex types.
+
+    ```python
+    from typing import List, Dict, Any
+
+    Messages = List[Dict[str, Any]]
+    Config = Dict[str, Union[str, int, bool]]
+
+    def agent(messages: Messages) -> str:
+        return process(messages)
+    ```
+  </Accordion>
+
+  <Accordion title="Callable Types">
+    Type hints for callable objects.
+
+    ```python
+    from typing import Callable
+
+    def apply(func: Callable[[int], str], value: int) -> str:
+        return func(value)
+
+    result = apply(str, 42)  # Returns "42"
+    ```
+  </Accordion>
+
+  <Accordion title="Advanced Types">
+    Literal, TypeVar, Protocol, and more.
+
+    ```python
+    from typing import Literal, TypeVar, Protocol
+
+    Mode = Literal['read', 'write', 'append']
+
+    T = TypeVar('T')
+
+    def first(items: List[T]) -> T:
+        return items[0]
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Type Checking
+
+Monty includes [ty](https://docs.astral.sh/ty/) for runtime type checking:
+
+```python
+from typing import List
+
+def process(items: List[str]) -> int:
+    return len(items)
+
+# Type checking happens automatically when enabled
+# Catches type errors before execution
+```
+
+---
+
+## asyncio Module
+
+Asynchronous programming support for agent workflows.
+
+### Functions
+
+<AccordionGroup>
+  <Accordion title="asyncio.run()">
+    Run a coroutine to completion.
+
+    ```python
+    import asyncio
+
+    async def main():
+        result = await fetch_data()
+        return process(result)
+
+    # Run the async function
+    output = asyncio.run(main())
+    ```
+  </Accordion>
+
+  <Accordion title="asyncio.gather()">
+    Run multiple coroutines concurrently.
+
+    ```python
+    import asyncio
+
+    async def agent(prompt: str):
+        # Fetch multiple resources concurrently
+        results = await asyncio.gather(
+            fetch_user_data(user_id),
+            fetch_preferences(user_id),
+            fetch_history(user_id)
+        )
+        user, prefs, history = results
+        return combine(user, prefs, history)
+    ```
+
+    <Note>
+      The host acts as the event loop. Monty yields control when tasks are blocked, allowing efficient concurrent execution.
+    </Note>
+  </Accordion>
+</AccordionGroup>
+
+### What's NOT Included
+
+These asyncio features are **not implemented** as they require additional scheduler features:
+
+- `asyncio.create_task()`
+- `asyncio.sleep()`
+- `asyncio.wait()`
+- `asyncio.wait_for()`
+- Event loops and task scheduling APIs
+
+<Warning>
+  The host environment acts as the event loop. Task scheduling is managed externally, not by Monty.
+</Warning>
+
+---
+
+## re Module
+
+Regular expression matching operations powered by [fancy-regex](https://github.com/fancy-regex/fancy-regex).
+
+### Pattern Matching
+
+<AccordionGroup>
+  <Accordion title="Basic Matching">
+    Find patterns in strings.
+
+    ```python
+    import re
+
+    # Search for first match
+    match = re.search(r'\d+', 'Order 12345 confirmed')
+    if match:
+        print(match.group())  # "12345"
+
+    # Match from start
+    if re.match(r'[A-Z]', 'Hello'):
+        print('Starts with uppercase')
+
+    # Match entire string
+    if re.fullmatch(r'\d{5}', '12345'):
+        print('Valid 5-digit code')
+    ```
+  </Accordion>
+
+  <Accordion title="Finding All Matches">
+    Extract all occurrences of a pattern.
+
+    ```python
+    import re
+
+    text = 'Prices: $10, $25, $99'
+    prices = re.findall(r'\$(\d+)', text)
+    print(prices)  # ['10', '25', '99']
+
+    # Iterate over matches
+    for match in re.finditer(r'\d+', 'a1b2c3'):
+        print(match.group())  # Prints: 1, 2, 3
+    ```
+  </Accordion>
+
+  <Accordion title="Substitution">
+    Replace pattern matches.
+
+    ```python
+    import re
+
+    # Replace all occurrences
+    text = 'Hello World'
+    result = re.sub(r'World', 'Python', text)
+    print(result)  # "Hello Python"
+
+    # Limit replacements
+    result = re.sub(r'a', 'x', 'banana', count=2)
+    print(result)  # "bxnxna"
+    ```
+  </Accordion>
+
+  <Accordion title="Splitting">
+    Split strings by pattern.
+
+    ```python
+    import re
+
+    parts = re.split(r'[,;]\s*', 'a, b; c,d')
+    print(parts)  # ['a', 'b', 'c', 'd']
+
+    # Limit splits
+    parts = re.split(r'\s+', 'a b c d', maxsplit=2)
+    print(parts)  # ['a', 'b', 'c d']
+    ```
+  </Accordion>
+
+  <Accordion title="Compiled Patterns">
+    Compile patterns for reuse.
+
+    ```python
+    import re
+
+    # Compile once, use many times
+    pattern = re.compile(r'\w+@\w+\.\w+')
+
+    emails = [
+        'contact@example.com',
+        'invalid-email',
+        'admin@site.org'
+    ]
+
+    for email in emails:
+        if pattern.match(email):
+            print(f'{email} is valid')
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Flags
+
+Supported regex flags:
+
+```python
+import re
+
+# Case-insensitive matching
+re.search(r'hello', 'HELLO', re.IGNORECASE)  # or re.I
+
+# Multiline mode (^ and $ match line boundaries)
+re.search(r'^start', text, re.MULTILINE)  # or re.M
+
+# Dot matches newlines
+re.search(r'a.b', 'a\nb', re.DOTALL)  # or re.S
+
+# ASCII-only mode for \w, \d, \s
+re.search(r'\w+', text, re.ASCII)  # or re.A
+```
+
+---
+
+## pathlib Module
+
+Object-oriented filesystem path manipulation.
+
+```python
+from pathlib import Path
+
+# Create paths
+path = Path('data') / 'files' / 'output.txt'
+
+# Path properties
+print(path.name)       # "output.txt"
+print(path.stem)       # "output"
+print(path.suffix)     # ".txt"
+print(path.parent)     # Path('data/files')
+
+# Path operations
+path = path.with_suffix('.json')
+path = path.with_name('input.txt')
+```
+
+<Warning>
+  Like `os`, `pathlib` operations that access the filesystem are sandboxed. Path manipulation is safe, but file operations are controlled by the host.
+</Warning>
+
+---
+
+## Coming Soon
+
+These modules are planned for future releases:
+
+- **datetime** - Date and time handling
+- **dataclasses** - Data class decorators
+- **json** - JSON encoding and decoding
+
+<Note>
+  Third-party libraries are **not supported** and are not a goal for Monty. The interpreter is designed specifically for agent-written code using only the stdlib.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Python Subset" icon="python" href="/language/python-subset">
+    Learn about supported Python language features
+  </Card>
+  <Card title="Limitations" icon="triangle-exclamation" href="/language/limitations">
+    Understand what's not supported in Monty
+  </Card>
+</CardGroup>

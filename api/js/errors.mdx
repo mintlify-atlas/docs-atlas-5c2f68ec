@@ -1,0 +1,415 @@
+---
+title: "Error Classes"
+description: "Exception handling with MontySyntaxError, MontyRuntimeError, and MontyTypingError"
+---
+
+## Overview
+
+Monty provides three specialized error classes for different types of failures:
+
+- `MontySyntaxError` - Syntax or parsing errors
+- `MontyRuntimeError` - Runtime exceptions during execution
+- `MontyTypingError` - Static type checking errors
+
+All error classes inherit from `MontyError`, so you can catch any Monty exception with a single catch clause.
+
+## MontyError (Base Class)
+
+Base class for all Monty interpreter errors.
+
+### Properties
+
+<ResponseField name="message" type="string">
+  The error message (includes exception type and message)
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The error name: `'MontyError'`
+</ResponseField>
+
+<ResponseField name="exception" type="ExceptionInfo">
+  Information about the inner Python exception
+  
+  <Expandable title="ExceptionInfo properties">
+    <ResponseField name="typeName" type="string">
+      The Python exception type (e.g., `'ValueError'`, `'SyntaxError'`)
+    </ResponseField>
+    
+    <ResponseField name="message" type="string">
+      The exception message
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Methods
+
+#### display()
+
+```typescript
+display(format?: 'type-msg' | 'msg'): string
+```
+
+Returns formatted exception string.
+
+<ParamField path="format" type="'type-msg' | 'msg'">
+  - `'msg'` - Just the message (default)
+  - `'type-msg'` - Format as `'ExceptionType: message'`
+</ParamField>
+
+<ResponseField name="output" type="string">
+  Formatted exception string
+</ResponseField>
+
+### Example
+
+```typescript
+import { Monty, MontyError } from '@pydantic/monty'
+
+try {
+  const m = new Monty('invalid code')
+} catch (error) {
+  if (error instanceof MontyError) {
+    console.log('Exception type:', error.exception.typeName)
+    console.log('Message:', error.display('msg'))
+    console.log('Full:', error.display('type-msg'))
+  }
+}
+```
+
+## MontySyntaxError
+
+Raised when Python code has syntax errors or cannot be parsed.
+
+Inherits all properties and methods from `MontyError`.
+
+### Properties
+
+<ResponseField name="name" type="string">
+  `'MontySyntaxError'`
+</ResponseField>
+
+The inner exception `typeName` is always `'SyntaxError'`.
+
+### Example
+
+```typescript
+import { Monty, MontySyntaxError } from '@pydantic/monty'
+
+try {
+  const m = new Monty('def')
+} catch (error) {
+  if (error instanceof MontySyntaxError) {
+    console.log('Syntax error:', error.message)
+    console.log('Details:', error.display('type-msg'))
+  }
+}
+```
+
+### Common Syntax Errors
+
+```typescript
+// Incomplete function definition
+const m1 = new Monty('def foo') // MontySyntaxError
+
+// Invalid syntax
+const m2 = new Monty('x = =') // MontySyntaxError
+
+// Unclosed string
+const m3 = new Monty('"hello') // MontySyntaxError
+```
+
+## MontyRuntimeError
+
+Raised when Monty code fails during execution. Provides access to the traceback and formatted error output.
+
+Inherits all properties and methods from `MontyError`.
+
+### Properties
+
+<ResponseField name="name" type="string">
+  `'MontyRuntimeError'`
+</ResponseField>
+
+### Methods
+
+#### traceback()
+
+```typescript
+traceback(): Frame[]
+```
+
+Returns the Monty traceback as an array of stack frames.
+
+<ResponseField name="frames" type="Frame[]">
+  Array of stack frames where the error occurred
+  
+  <Expandable title="Frame properties">
+    <ResponseField name="filename" type="string">
+      The filename where the code is located
+    </ResponseField>
+    
+    <ResponseField name="line" type="number">
+      Line number (1-based)
+    </ResponseField>
+    
+    <ResponseField name="column" type="number">
+      Column number (1-based)
+    </ResponseField>
+    
+    <ResponseField name="endLine" type="number">
+      End line number (1-based)
+    </ResponseField>
+    
+    <ResponseField name="endColumn" type="number">
+      End column number (1-based)
+    </ResponseField>
+    
+    <ResponseField name="functionName" type="string | null">
+      The function name, or `null` for module-level code
+    </ResponseField>
+    
+    <ResponseField name="sourceLine" type="string | null">
+      The source code line for preview
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+#### display()
+
+```typescript
+display(format?: 'traceback' | 'type-msg' | 'msg'): string
+```
+
+Returns formatted exception string.
+
+<ParamField path="format" type="'traceback' | 'type-msg' | 'msg'">
+  - `'traceback'` - Full traceback with stack frames (default)
+  - `'type-msg'` - Format as `'ExceptionType: message'`
+  - `'msg'` - Just the message
+</ParamField>
+
+<ResponseField name="output" type="string">
+  Formatted exception string
+</ResponseField>
+
+### Example: Basic Error Handling
+
+```typescript
+import { Monty, MontyRuntimeError } from '@pydantic/monty'
+
+try {
+  const m = new Monty('1 / 0')
+  m.run()
+} catch (error) {
+  if (error instanceof MontyRuntimeError) {
+    console.log('Runtime error:', error.message)
+    console.log('\nTraceback:')
+    console.log(error.display('traceback'))
+  }
+}
+```
+
+### Example: Inspecting Stack Frames
+
+```typescript
+import { Monty, MontyRuntimeError } from '@pydantic/monty'
+
+const code = `
+def divide(a, b):
+    return a / b
+
+def calculate():
+    return divide(10, 0)
+
+calculate()
+`
+
+try {
+  const m = new Monty(code)
+  m.run()
+} catch (error) {
+  if (error instanceof MontyRuntimeError) {
+    const frames = error.traceback()
+    frames.forEach(frame => {
+      console.log(`  File "${frame.filename}", line ${frame.line}, in ${frame.functionName || '<module>'}`)  
+      if (frame.sourceLine) {
+        console.log(`    ${frame.sourceLine}`)
+      }
+    })
+  }
+}
+```
+
+### Common Runtime Errors
+
+```typescript
+// Division by zero
+const m1 = new Monty('1 / 0')
+m1.run() // MontyRuntimeError: ZeroDivisionError
+
+// Name not defined
+const m2 = new Monty('x + 1')
+m2.run() // MontyRuntimeError: NameError
+
+// Type error
+const m3 = new Monty('"hello" - 5')
+m3.run() // MontyRuntimeError: TypeError
+
+// Index error
+const m4 = new Monty('[1, 2, 3][10]')
+m4.run() // MontyRuntimeError: IndexError
+```
+
+## MontyTypingError
+
+Raised when static type checking finds errors in the code.
+
+Inherits all properties and methods from `MontyError`.
+
+### Properties
+
+<ResponseField name="name" type="string">
+  `'MontyTypingError'`
+</ResponseField>
+
+The inner exception `typeName` is always `'TypeError'`.
+
+### Methods
+
+#### displayDiagnostics()
+
+```typescript
+displayDiagnostics(format?: TypingDisplayFormat, color?: boolean): string
+```
+
+Renders rich type error diagnostics for tooling integration.
+
+<ParamField path="format" type="TypingDisplayFormat">
+  Output format (default: `'full'`)
+  
+  Options:
+  - `'full'` - Full diagnostic output with context
+  - `'concise'` - Concise single-line output
+  - `'json'` - JSON format
+  - `'jsonlines'` - JSON Lines format
+  - `'github'` - GitHub Actions format
+  - `'gitlab'` - GitLab CI format
+  - `'azure'` - Azure DevOps format
+  - `'pylint'` - Pylint format
+  - `'rdjson'` - Reviewdog JSON format
+</ParamField>
+
+<ParamField path="color" type="boolean">
+  Include ANSI color codes (default: `false`)
+</ParamField>
+
+<ResponseField name="output" type="string">
+  Formatted diagnostic output
+</ResponseField>
+
+### Example: Type Checking
+
+```typescript
+import { Monty, MontyTypingError } from '@pydantic/monty'
+
+const code = `
+def add(a: int, b: int) -> int:
+    return a + b
+
+result: str = add(1, 2)  # Type error: int assigned to str
+`
+
+try {
+  const m = new Monty(code, { typeCheck: true })
+} catch (error) {
+  if (error instanceof MontyTypingError) {
+    console.log('Type error found:')
+    console.log(error.displayDiagnostics('full', false))
+  }
+}
+```
+
+### Example: Manual Type Checking
+
+```typescript
+import { Monty, MontyTypingError } from '@pydantic/monty'
+
+const m = new Monty('"hello" + 1')
+
+try {
+  m.typeCheck()
+} catch (error) {
+  if (error instanceof MontyTypingError) {
+    // Display concise format for CLI
+    console.log(error.displayDiagnostics('concise'))
+    
+    // Or get JSON for tooling
+    const diagnostics = error.displayDiagnostics('json')
+    console.log(JSON.parse(diagnostics))
+  }
+}
+```
+
+### Example: Different Output Formats
+
+```typescript
+const m = new Monty('x: int = "hello"')
+
+try {
+  m.typeCheck()
+} catch (error) {
+  if (error instanceof MontyTypingError) {
+    // Full format with colors (for terminal)
+    console.log(error.displayDiagnostics('full', true))
+    
+    // GitHub Actions format (for CI)
+    console.log(error.displayDiagnostics('github'))
+    
+    // JSON format (for programmatic use)
+    const json = error.displayDiagnostics('json')
+    const parsed = JSON.parse(json)
+  }
+}
+```
+
+## Catching All Monty Errors
+
+```typescript
+import { Monty, MontyError, MontySyntaxError, MontyRuntimeError, MontyTypingError } from '@pydantic/monty'
+
+try {
+  const m = new Monty(code, { typeCheck: true })
+  const result = m.run({ inputs })
+} catch (error) {
+  if (error instanceof MontySyntaxError) {
+    console.error('Syntax error:', error.display())
+  } else if (error instanceof MontyTypingError) {
+    console.error('Type error:')
+    console.error(error.displayDiagnostics('concise'))
+  } else if (error instanceof MontyRuntimeError) {
+    console.error('Runtime error:')
+    console.error(error.display('traceback'))
+  } else if (error instanceof MontyError) {
+    console.error('Unknown Monty error:', error.message)
+  } else {
+    throw error // Not a Monty error
+  }
+}
+```
+
+## Error Type Hierarchy
+
+```
+Error (JavaScript built-in)
+ └── MontyError
+      ├── MontySyntaxError
+      ├── MontyRuntimeError
+      └── MontyTypingError
+```
+
+All Monty errors inherit from `MontyError`, which inherits from JavaScript's built-in `Error` class.
+
+## See Also
+
+- [Monty Class](/api/js/monty) - Main interpreter class
+- [Resource Limits](/api/js/resource-limits) - Prevent resource exhaustion errors

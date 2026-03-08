@@ -1,0 +1,261 @@
+---
+title: Data Analysis
+description: Analyze team expenses with async tool calls and loop-based data processing
+---
+
+## Overview
+
+This example demonstrates using Monty to analyze team expense data across multiple users. Instead of making 50+ sequential tool calls, the LLM writes a loop that processes each team member's expenses in code.
+
+<Note>
+This example is adapted from Anthropic's [Programmatic Tool Calling](https://platform.claude.com/cookbook/tool-use-programmatic-tool-calling-ptc#understanding-the-third-party-api) cookbook.
+</Note>
+
+## Why This Example Matters
+
+With traditional tool calling, analyzing expenses for a team would require:
+1. Call `get_team_members()` → returns 5 members
+2. For each member:
+   - Call `get_expenses(user_id, quarter, category)` → returns 10-15 expense items
+   - Call `get_custom_budget(user_id)` → returns budget or null
+3. Process results in the LLM
+
+This floods the context window with hundreds of expense items. With Monty:
+- The loop runs **in the sandbox**
+- Only the final summary returns to the host
+- Token usage drops dramatically
+
+## The Task
+
+Analyze Q3 travel expenses for the Engineering team and identify who exceeded their budget (standard $5,000 or custom).
+
+## Code Structure
+
+### Type Definitions
+
+```python
+type_definitions = '''
+from typing import Any
+
+async def get_team_members(department: str) -> dict[str, Any]:
+    """Get list of team members for a department.
+    Args:
+        department: The department name (e.g., "Engineering").
+    Returns:
+        Dictionary with list of team members.
+    """
+    ...
+
+async def get_expenses(user_id: int, quarter: str, category: str) -> dict[str, Any]:
+    """Get expense line items for a user.
+    Args:
+        user_id: The user's ID.
+        quarter: The quarter (e.g., "Q3").
+        category: The expense category (e.g., "travel").
+    Returns:
+        Dictionary with expense items.
+    """
+    ...
+
+async def get_custom_budget(user_id: int) -> dict[str, Any] | None:
+    """Get custom budget for a user if they have one.
+    Args:
+        user_id: The user's ID.
+    Returns:
+        Custom budget info or None if no custom budget.
+    """
+    ...
+'''
+```
+
+### The Sandbox Code
+
+```python
+code = """
+# Get Engineering team members
+team_data = await get_team_members(department="Engineering")
+team_members = team_data.get("members", [])
+
+# Standard budget
+STANDARD_BUDGET = 5000
+
+# Process each team member
+total_members = len(team_members)
+over_budget_list = []
+
+for member in team_members:
+    user_id = member.get("id")
+    name = member.get("name")
+
+    # Get Q3 travel expenses for this user
+    expenses_data = await get_expenses(user_id=user_id, quarter="Q3", category="travel")
+    expense_items = expenses_data.get("expenses", [])
+
+    # Sum up total expenses
+    total_spent = sum(item.get("amount", 0) for item in expense_items)
+
+    # Check if they exceeded standard budget
+    if total_spent > STANDARD_BUDGET:
+        # Check for custom budget
+        custom_budget_data = await get_custom_budget(user_id=user_id)
+
+        if custom_budget_data is not None:
+            budget = custom_budget_data.get("budget", STANDARD_BUDGET)
+        else:
+            budget = STANDARD_BUDGET
+
+        # Check if they exceeded their actual budget (standard or custom)
+        if total_spent > budget:
+            amount_over = total_spent - budget
+            over_budget_list.append({
+                "name": name,
+                "total_spent": total_spent,
+                "budget": budget,
+                "amount_over": amount_over
+            })
+
+# Return the analysis
+{
+    "total_team_members_analyzed": total_members,
+    "count_exceeded_budget": len(over_budget_list),
+    "over_budget_details": over_budget_list
+}
+"""
+```
+
+### Execution
+
+```python
+import pydantic_monty
+
+m = pydantic_monty.Monty(
+    code,
+    inputs=['prompt'],
+    script_name='expense.py',
+    type_check=True,
+    type_check_stubs=type_definitions,
+)
+
+async def main():
+    output = await pydantic_monty.run_monty_async(
+        m,
+        inputs={'prompt': 'testing'},
+        external_functions={
+            'get_team_members': data.get_team_members,
+            'get_expenses': data.get_expenses,
+            'get_custom_budget': data.get_custom_budget,
+        },
+    )
+    print(output)
+```
+
+## Example Data
+
+### Team Members
+
+```python
+team_members = [
+    {'id': 1, 'name': 'Alice Chen'},
+    {'id': 2, 'name': 'Bob Smith'},
+    {'id': 3, 'name': 'Carol Jones'},
+    {'id': 4, 'name': 'David Kim'},
+    {'id': 5, 'name': 'Eve Wilson'},
+]
+```
+
+### Expense Data
+
+Each user has 8-15 expense line items with details like:
+
+```python
+{
+    'date': '2024-07-15',
+    'amount': 450.00,
+    'description': 'Flight to NYC'
+}
+```
+
+### Custom Budgets
+
+```python
+custom_budgets = {
+    2: {'amount': 7000.00, 'reason': 'International travel required'},
+}
+```
+
+## Expected Output
+
+```python
+{
+    "total_team_members_analyzed": 5,
+    "count_exceeded_budget": 2,
+    "over_budget_details": [
+        {
+            "name": "Carol Jones",
+            "total_spent": 6740.0,
+            "budget": 5000,
+            "amount_over": 1740.0
+        },
+        {
+            "name": "Eve Wilson",
+            "total_spent": 5680.0,
+            "budget": 5000,
+            "amount_over": 680.0
+        }
+    ]
+}
+```
+
+<Note>
+Bob Smith spent over the standard budget but has a custom budget of $7,000, so he's not flagged as over budget.
+</Note>
+
+## Key Benefits
+
+<Steps>
+  <Step title="Loops in Code">
+    The `for member in team_members` loop is natural in Python, but would require complex orchestration with tool calls.
+  </Step>
+  
+  <Step title="Conditional Logic">
+    The code checks if expenses exceed the standard budget, then conditionally fetches custom budgets. This would require multiple LLM round-trips with tool calling.
+  </Step>
+  
+  <Step title="In-Sandbox Computation">
+    Summing expense amounts happens in the sandbox. The LLM doesn't need to do mental math or see every expense item.
+  </Step>
+  
+  <Step title="Reduced Token Usage">
+    Only the final summary leaves the sandbox. With tool calling, every expense item (50+ items) would flood the context.
+  </Step>
+</Steps>
+
+## Running the Example
+
+```bash
+uv run python examples/expense_analysis/main.py
+```
+
+## Async Patterns
+
+All external functions are `async`, and Monty handles them seamlessly:
+
+```python
+# Multiple async calls in sequence
+team_data = await get_team_members(department="Engineering")
+expenses_data = await get_expenses(user_id=user_id, quarter="Q3", category="travel")
+
+# Conditional async calls
+if total_spent > STANDARD_BUDGET:
+    custom_budget_data = await get_custom_budget(user_id=user_id)
+```
+
+<Warning>
+For parallel execution, use `asyncio.gather()` to fire multiple calls at once instead of awaiting each one sequentially.
+</Warning>
+
+## Next Steps
+
+- Explore the full source in `examples/expense_analysis/`
+- Try [Web Scraper](/examples/web-scraper) for browser automation
+- See [SQL Playground](/examples/sql-playground) for file mounting and SQL queries

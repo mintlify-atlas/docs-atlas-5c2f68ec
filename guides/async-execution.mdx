@@ -1,0 +1,498 @@
+---
+title: Async Execution
+description: Run async code in Monty and use async external functions for better performance
+---
+
+Monty fully supports Python's async/await syntax and provides helpers for running async code from both sync and async host environments.
+
+## Running Async Code
+
+Monty can execute async Python code using the `run_monty_async()` helper function:
+
+<CodeGroup>
+```python Python
+import asyncio
+import pydantic_monty
+from pydantic_monty import run_monty_async
+
+code = """
+async def fetch_data():
+    return "data"
+
+await fetch_data()
+"""
+
+m = pydantic_monty.Monty(code)
+
+async def main():
+    result = await run_monty_async(m)
+    print(result)  # "data"
+
+asyncio.run(main())
+```
+
+```typescript JavaScript
+import { Monty, runMontyAsync } from '@pydantic/monty'
+
+const code = `
+async def fetch_data():
+    return "data"
+
+await fetch_data()
+`
+
+const m = new Monty(code)
+
+const result = await runMontyAsync(m, {
+  externalFunctions: {}
+})
+console.log(result)  // "data"
+```
+</CodeGroup>
+
+## Async External Functions
+
+You can provide async external functions that will be awaited automatically:
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import asyncio
+    from pydantic_monty import run_monty_async
+    
+    code = "await fetch_data()"
+    
+    async def fetch_data():
+        await asyncio.sleep(0.1)
+        return "async result"
+    
+    m = pydantic_monty.Monty(code)
+    
+    async def main():
+        result = await run_monty_async(
+            m,
+            external_functions={'fetch_data': fetch_data}
+        )
+        print(result)  # "async result"
+    
+    asyncio.run(main())
+    ```
+  </Tab>
+
+  <Tab title="JavaScript">
+    ```typescript
+    import { Monty, runMontyAsync } from '@pydantic/monty'
+    
+    const code = "await fetch_data(url)"
+    
+    const m = new Monty(code, { inputs: ['url'] })
+    
+    const result = await runMontyAsync(m, {
+      inputs: { url: 'https://example.com' },
+      externalFunctions: {
+        fetch_data: async (url: string) => {
+          const response = await fetch(url)
+          return response.text()
+        }
+      }
+    })
+    console.log(result)
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+  `run_monty_async()` automatically handles both sync and async external functions. Sync functions are called directly, while async functions are awaited.
+</Info>
+
+## Mixed Sync and Async Functions
+
+You can mix sync and async external functions in the same execution:
+
+```python
+import asyncio
+from pydantic_monty import run_monty_async
+
+code = """
+sync_val = sync_func()
+async_val = await async_func()
+sync_val + async_val
+"""
+
+def sync_func():
+    return 10
+
+async def async_func():
+    await asyncio.sleep(0.001)
+    return 5
+
+m = pydantic_monty.Monty(code)
+
+async def main():
+    result = await run_monty_async(
+        m,
+        external_functions={
+            'sync_func': sync_func,
+            'async_func': async_func
+        }
+    )
+    print(result)  # 15
+
+asyncio.run(main())
+```
+
+## Asyncio.gather for Concurrent Execution
+
+Monty supports `asyncio.gather()` for running multiple async operations concurrently:
+
+```python
+import asyncio
+from pydantic_monty import run_monty_async
+
+code = """
+import asyncio
+await asyncio.gather(fetch_a(), fetch_b())
+"""
+
+async def fetch_a():
+    await asyncio.sleep(0.01)
+    return 'a'
+
+async def fetch_b():
+    await asyncio.sleep(0.005)
+    return 'b'
+
+m = pydantic_monty.Monty(code)
+
+async def main():
+    result = await run_monty_async(
+        m,
+        external_functions={'fetch_a': fetch_a, 'fetch_b': fetch_b}
+    )
+    print(result)  # ['a', 'b']
+
+asyncio.run(main())
+```
+
+## Complex Async Patterns
+
+Monty handles nested `asyncio.gather()` with external functions:
+
+```python
+import asyncio
+from pydantic_monty import run_monty_async
+
+code = """
+import asyncio
+
+async def get_city_weather(city_name: str):
+    coords = await get_lat_lng(location_description=city_name)
+    lat, lng = coords['lat'], coords['lng']
+    temp_task = get_temp(lat=lat, lng=lng)
+    desc_task = get_weather_description(lat=lat, lng=lng)
+    temp, desc = await asyncio.gather(temp_task, desc_task)
+    return {
+        'city': city_name,
+        'temp': temp,
+        'description': desc
+    }
+
+async def main():
+    cities = ['London', 'Paris', 'Tokyo']
+    results = await asyncio.gather(*(get_city_weather(city) for city in cities))
+    return results
+
+await main()
+"""
+
+async def get_lat_lng(location_description: str):
+    # Return mock coordinates
+    coords = {
+        'London': {'lat': 51.5, 'lng': -0.1},
+        'Paris': {'lat': 48.9, 'lng': 2.3},
+        'Tokyo': {'lat': 35.7, 'lng': 139.7},
+    }
+    return coords[location_description]
+
+async def get_temp(lat: float, lng: float):
+    # Return mock temperature
+    return 20.0
+
+async def get_weather_description(lat: float, lng: lng):
+    # Return mock description
+    return 'Sunny'
+
+m = pydantic_monty.Monty(code)
+
+async def main():
+    result = await run_monty_async(
+        m,
+        external_functions={
+            'get_lat_lng': get_lat_lng,
+            'get_temp': get_temp,
+            'get_weather_description': get_weather_description,
+        }
+    )
+    print(result)
+    # [{'city': 'London', 'temp': 20.0, 'description': 'Sunny'}, ...]
+
+asyncio.run(main())
+```
+
+## Manual Async Handling with FutureSnapshot
+
+For advanced use cases, you can manually handle async execution using `FutureSnapshot`:
+
+```python
+import pydantic_monty
+
+code = "await foobar(1, 2)"
+m = pydantic_monty.Monty(code)
+
+# Start execution
+progress = m.start()
+assert isinstance(progress, pydantic_monty.FunctionSnapshot)
+assert progress.function_name == 'foobar'
+
+call_id = progress.call_id
+
+# Resume with future (indicates async operation)
+progress = progress.resume(future=...)
+assert isinstance(progress, pydantic_monty.FutureSnapshot)
+
+# Resume with return value for the pending call
+result = progress.resume({call_id: {'return_value': 3}})
+assert result.output == 3
+```
+
+### Multiple Pending Futures
+
+```python
+code = """
+import asyncio
+await asyncio.gather(foo(1), bar(2))
+"""
+
+m = pydantic_monty.Monty(code)
+
+# Start and collect call IDs
+progress = m.start()
+foo_id = progress.call_id
+progress = progress.resume(future=...)
+
+bar_id = progress.call_id
+progress = progress.resume(future=...)
+
+# Now we have a FutureSnapshot with multiple pending calls
+assert isinstance(progress, pydantic_monty.FutureSnapshot)
+assert set(progress.pending_call_ids) == {foo_id, bar_id}
+
+# Resume all at once
+result = progress.resume({
+    foo_id: {'return_value': 3},
+    bar_id: {'return_value': 4}
+})
+assert result.output == [3, 4]
+```
+
+<Note>
+  Most users should use `run_monty_async()` instead of manually handling `FutureSnapshot`. Manual handling is only needed for advanced patterns like custom async schedulers.
+</Note>
+
+## Async with OS Access
+
+`run_monty_async()` supports OS access for file operations:
+
+```python
+import asyncio
+from pydantic_monty import run_monty_async, OSAccess, MemoryFile
+
+fs = OSAccess([MemoryFile('/data.txt', content='test data')])
+
+async def process(text: str) -> str:
+    return text.upper()
+
+code = """
+from pathlib import Path
+content = Path('/data.txt').read_text()
+await process(content)
+"""
+
+m = pydantic_monty.Monty(code)
+
+async def main():
+    result = await run_monty_async(
+        m,
+        external_functions={'process': process},
+        os=fs
+    )
+    print(result)  # 'TEST DATA'
+
+asyncio.run(main())
+```
+
+## Error Handling in Async Code
+
+Exceptions from async external functions propagate normally:
+
+```python
+import asyncio
+from pydantic_monty import run_monty_async
+import pydantic_monty
+
+code = "await async_fail()"
+
+async def async_fail():
+    await asyncio.sleep(0.001)
+    raise RuntimeError('async error')
+
+m = pydantic_monty.Monty(code)
+
+async def main():
+    try:
+        await run_monty_async(
+            m,
+            external_functions={'async_fail': async_fail}
+        )
+    except pydantic_monty.MontyRuntimeError as e:
+        inner = e.exception()
+        print(type(inner))  # <class 'RuntimeError'>
+        print(inner.args[0])  # 'async error'
+
+asyncio.run(main())
+```
+
+## Exception Handling in Async Code
+
+Async exceptions can be caught with try/except:
+
+```python
+code = """
+try:
+    await fail()
+except ValueError:
+    caught = True
+caught
+"""
+
+async def fail():
+    raise ValueError('caught error')
+
+m = pydantic_monty.Monty(code)
+
+async def main():
+    result = await run_monty_async(
+        m,
+        external_functions={'fail': fail}
+    )
+    print(result)  # True
+
+asyncio.run(main())
+```
+
+## JavaScript Async Example
+
+```typescript
+import { Monty, runMontyAsync } from '@pydantic/monty'
+
+const code = `
+import asyncio
+
+async def fetch_all():
+    results = await asyncio.gather(
+        fetch_user(1),
+        fetch_user(2),
+        fetch_user(3)
+    )
+    return results
+
+await fetch_all()
+`
+
+const m = new Monty(code)
+
+const result = await runMontyAsync(m, {
+  externalFunctions: {
+    fetch_user: async (id: number) => {
+      const response = await fetch(`https://api.example.com/users/${id}`)
+      return response.json()
+    }
+  }
+})
+
+console.log(result)
+```
+
+## Performance Considerations
+
+<Steps>
+  <Step title="Use asyncio.gather for concurrency">
+    When you need to call multiple external functions, use `asyncio.gather()` to run them concurrently instead of sequentially:
+    
+    ```python
+    # Sequential (slow)
+    a = await fetch_a()
+    b = await fetch_b()
+    
+    # Concurrent (fast)
+    a, b = await asyncio.gather(fetch_a(), fetch_b())
+    ```
+  </Step>
+
+  <Step title="Prefer async for I/O">
+    Use async external functions for I/O-bound operations (network, file, database):
+    
+    ```python
+    async def fetch_from_api(url: str) -> dict:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url)
+            return response.json()
+    ```
+  </Step>
+
+  <Step title="Keep sync for CPU-bound work">
+    Use sync functions for CPU-bound operations that don't benefit from async:
+    
+    ```python
+    def compute_hash(data: str) -> str:
+        return hashlib.sha256(data.encode()).hexdigest()
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Async functions have overhead. Only use async when you have actual I/O operations that benefit from concurrency.
+</Warning>
+
+## Best Practices
+
+1. **Use `run_monty_async()` for simplicity**: It handles both sync and async functions automatically
+2. **Provide type stubs for async functions**: Help type checking understand async function signatures
+3. **Handle exceptions properly**: Async exceptions propagate the same way as sync exceptions
+4. **Use `asyncio.gather()` wisely**: Only for independent operations that can run concurrently
+5. **Test error paths**: Make sure your error handling works for both sync and async paths
+
+## When to Use Async
+
+Use async execution when:
+
+- Your external functions perform I/O (network requests, file operations, database queries)
+- You need to call multiple external functions concurrently
+- You're building a web service or API that uses async frameworks (FastAPI, aiohttp)
+
+Stick with sync when:
+
+- Your code has no external function calls
+- External functions are CPU-bound (computation, parsing)
+- You're building a simple script or tool
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Iterative Execution" icon="arrows-rotate" href="/guides/iterative-execution">
+    Learn about manual async handling with FutureSnapshot
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Handle exceptions in async code
+  </Card>
+</CardGroup>

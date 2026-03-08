@@ -1,0 +1,296 @@
+---
+title: "Value & MontyObject"
+description: "Primary value types representing Python objects at runtime"
+icon: "cube"
+---
+
+# Value & MontyObject
+
+## Value
+
+Primary value type representing Python objects at runtime.
+
+This enum uses a hybrid design: small immediate values (`Int`, `Bool`, `None`) are stored inline, while heap-allocated values (`List`, `Str`, `Dict`, etc.) are stored in the arena and referenced via `Ref(HeapId)`.
+
+<Note>
+  `Clone` is intentionally NOT derived. Use `clone_with_heap()` for heap values or `clone_immediate()` for immediate values only. Direct cloning via `.clone()` would bypass reference counting and cause memory leaks.
+</Note>
+
+### Variants
+
+<ParamField path="Undefined" type="Value">
+  Internal undefined value marker
+</ParamField>
+
+<ParamField path="Ellipsis" type="Value">
+  Python's `Ellipsis` singleton (`...`)
+</ParamField>
+
+<ParamField path="None" type="Value">
+  Python's `None` singleton
+</ParamField>
+
+<ParamField path="Bool(bool)" type="Value">
+  Python boolean (`True` or `False`)
+</ParamField>
+
+<ParamField path="Int(i64)" type="Value">
+  Python integer (64-bit signed)
+</ParamField>
+
+<ParamField path="Float(f64)" type="Value">
+  Python float (64-bit IEEE 754)
+</ParamField>
+
+<ParamField path="InternString(StringId)" type="Value">
+  An interned string literal. The `StringId` references the string in the Interns table. To get the actual string content, use `interns.get(string_id)`.
+</ParamField>
+
+<ParamField path="InternBytes(BytesId)" type="Value">
+  An interned bytes literal. The `BytesId` references the bytes in the Interns table. To get the actual bytes content, use `interns.get_bytes(bytes_id)`.
+</ParamField>
+
+<ParamField path="InternLongInt(LongIntId)" type="Value">
+  An interned long integer literal. The `LongIntId` references the `BigInt` in the Interns table. Used for integer literals exceeding i64 range. Converted to heap-allocated `LongInt` on load.
+</ParamField>
+
+<ParamField path="Builtin(Builtins)" type="Value">
+  A builtin function or exception type
+</ParamField>
+
+<ParamField path="ModuleFunction(ModuleFunctions)" type="Value">
+  A function from a module (not a global builtin). Module functions require importing a module to access (e.g., `asyncio.gather`).
+</ParamField>
+
+<ParamField path="DefFunction(FunctionId)" type="Value">
+  A function defined in the module (not a closure, doesn't capture any variables)
+</ParamField>
+
+<ParamField path="ExtFunction(StringId)" type="Value">
+  Reference to an external function defined on the host. The `StringId` stores the interned function name. When called, the VM yields a `FrameExit::ExternalCall` with this `StringId` so the host can look up and execute the function by name.
+</ParamField>
+
+<ParamField path="Marker(Marker)" type="Value">
+  A marker value representing special objects like sys.stdout/stderr. These exist but have minimal functionality in the sandboxed environment.
+</ParamField>
+
+<ParamField path="Property(Property)" type="Value">
+  A property descriptor that computes its value when accessed. When retrieved via `py_getattr`, the property's getter is invoked.
+</ParamField>
+
+<ParamField path="ExternalFuture(CallId)" type="Value">
+  A pending external function call result. Created when the host calls `run_pending()` instead of `run(result)` for an external function call. The `CallId` correlates with the call that created it. When awaited, blocks the task until the host provides a result via `resume()`. ExternalFutures follow single-shot semantics like coroutines - awaiting an already-awaited ExternalFuture raises RuntimeError.
+</ParamField>
+
+<ParamField path="Ref(HeapId)" type="Value">
+  Heap-allocated values (stored in arena)
+</ParamField>
+
+## MontyObject
+
+A Python value that can be passed to or returned from the interpreter.
+
+This is the public-facing type for Python values. It owns all its data and can be freely cloned, serialized, or stored. Unlike the internal `Value` type, `MontyObject` does not require a heap for operations.
+
+### Input vs Output Variants
+
+Most variants can be used both as inputs (passed to `run()`) and outputs (returned from execution). However:
+- `Repr` is output-only: represents values that have no direct `MontyObject` mapping
+- `Exception` can be used as input (to raise) or output (when code raises)
+
+### Variants
+
+<ParamField path="Ellipsis" type="MontyObject">
+  Python's `Ellipsis` singleton (`...`)
+</ParamField>
+
+<ParamField path="None" type="MontyObject">
+  Python's `None` singleton
+</ParamField>
+
+<ParamField path="Bool(bool)" type="MontyObject">
+  Python boolean (`True` or `False`)
+</ParamField>
+
+<ParamField path="Int(i64)" type="MontyObject">
+  Python integer (64-bit signed)
+</ParamField>
+
+<ParamField path="BigInt(BigInt)" type="MontyObject">
+  Python arbitrary-precision integer (larger than i64)
+</ParamField>
+
+<ParamField path="Float(f64)" type="MontyObject">
+  Python float (64-bit IEEE 754)
+</ParamField>
+
+<ParamField path="String(String)" type="MontyObject">
+  Python string (UTF-8)
+</ParamField>
+
+<ParamField path="Bytes(Vec<u8>)" type="MontyObject">
+  Python bytes object
+</ParamField>
+
+<ParamField path="List(Vec<MontyObject>)" type="MontyObject">
+  Python list (mutable sequence)
+</ParamField>
+
+<ParamField path="Tuple(Vec<MontyObject>)" type="MontyObject">
+  Python tuple (immutable sequence)
+</ParamField>
+
+<ParamField path="NamedTuple" type="MontyObject">
+  Python named tuple (immutable sequence with named fields). Named tuples behave like tuples but also support attribute access by field name.
+  
+  Fields:
+  - `type_name: String` - Type name for repr (e.g., "os.stat_result")
+  - `field_names: Vec<String>` - Field names in order
+  - `values: Vec<MontyObject>` - Values in order (same length as field_names)
+</ParamField>
+
+<ParamField path="Dict(DictPairs)" type="MontyObject">
+  Python dictionary (insertion-ordered mapping)
+</ParamField>
+
+<ParamField path="Set(Vec<MontyObject>)" type="MontyObject">
+  Python set (mutable, unordered collection of unique elements)
+</ParamField>
+
+<ParamField path="FrozenSet(Vec<MontyObject>)" type="MontyObject">
+  Python frozenset (immutable, unordered collection of unique elements)
+</ParamField>
+
+<ParamField path="Exception" type="MontyObject">
+  Python exception with type and optional message argument
+  
+  Fields:
+  - `exc_type: ExcType` - The exception type (e.g., `ValueError`, `TypeError`)
+  - `arg: Option<String>` - Optional string argument passed to the exception constructor
+</ParamField>
+
+<ParamField path="Type(Type)" type="MontyObject">
+  A Python type object (e.g., `int`, `str`, `list`). Returned by the `type()` builtin and can be compared with other types.
+</ParamField>
+
+<ParamField path="BuiltinFunction(BuiltinsFunctions)" type="MontyObject">
+  A builtin function reference
+</ParamField>
+
+<ParamField path="Path(String)" type="MontyObject">
+  Python `pathlib.Path` object (or technically a `PurePosixPath`). Represents a filesystem path. Can be used both as input (from host) and output.
+</ParamField>
+
+<ParamField path="Dataclass" type="MontyObject">
+  A dataclass instance with class name, field names, attributes, and mutability
+  
+  Fields:
+  - `name: String` - The class name (e.g., "Point", "User")
+  - `type_id: u64` - Identifier of the type, from `id(type(dc))` in python
+  - `field_names: Vec<String>` - Declared field names in definition order (for repr)
+  - `attrs: DictPairs` - All attribute name → value mapping (includes fields and extra attrs)
+  - `frozen: bool` - Whether this dataclass instance is immutable
+</ParamField>
+
+<ParamField path="Function" type="MontyObject">
+  An external function provided by the host. Returned by the host in response to a `NameLookup` to provide a callable that the VM can invoke.
+  
+  Fields:
+  - `name: String` - The function name (used for repr, error messages, and function call identification)
+  - `docstring: Option<String>` - Optional docstring for the function
+</ParamField>
+
+<ParamField path="Repr(String)" type="MontyObject">
+  Fallback for values that cannot be represented as other variants. Contains the `repr()` string of the original value. This is output-only and cannot be used as an input.
+</ParamField>
+
+<ParamField path="Cycle(HeapId, String)" type="MontyObject">
+  Represents a cycle detected during Value-to-MontyObject conversion. When converting cyclic structures (e.g., `a = []; a.append(a)`), this variant is used to break the infinite recursion. Contains the heap ID and the type-specific placeholder string (e.g., `"[...]"` for lists, `"{...}"` for dicts). This is output-only.
+</ParamField>
+
+### Methods
+
+#### py_repr()
+
+Returns the Python `repr()` string for this value.
+
+<ResponseField name="String">
+  The repr string representation
+</ResponseField>
+
+```rust
+use monty::MontyObject;
+
+let obj = MontyObject::Int(42);
+assert_eq!(obj.py_repr(), "42");
+
+let obj = MontyObject::String("hello".to_owned());
+assert_eq!(obj.py_repr(), "'hello'");
+```
+
+#### is_truthy()
+
+Returns `true` if this value is "truthy" according to Python's truth testing rules.
+
+In Python, the following values are considered falsy:
+- `None` and `Ellipsis`
+- `False`
+- Zero numeric values (`0`, `0.0`)
+- Empty sequences and collections (`""`, `b""`, `[]`, `()`, `{}`)
+
+All other values are truthy, including `Exception` and `Repr` variants.
+
+<ResponseField name="bool">
+  True if the value is truthy
+</ResponseField>
+
+```rust
+use monty::MontyObject;
+
+assert!(MontyObject::Int(42).is_truthy());
+assert!(!MontyObject::Int(0).is_truthy());
+assert!(MontyObject::String("hello".to_owned()).is_truthy());
+assert!(!MontyObject::String("".to_owned()).is_truthy());
+```
+
+#### type_name()
+
+Returns the Python type name for this value (e.g., `"int"`, `"str"`, `"list"`).
+
+These are the same names returned by Python's `type(x).__name__`.
+
+<ResponseField name="&'static str">
+  The type name
+</ResponseField>
+
+```rust
+use monty::MontyObject;
+
+assert_eq!(MontyObject::Int(42).type_name(), "int");
+assert_eq!(MontyObject::String("hello".to_owned()).type_name(), "str");
+assert_eq!(MontyObject::List(vec![]).type_name(), "list");
+```
+
+### Hashability
+
+Only immutable variants (`None`, `Ellipsis`, `Bool`, `Int`, `Float`, `String`, `Bytes`) implement `Hash`. Attempting to hash mutable variants (`List`, `Dict`) will panic.
+
+### JSON Serialization
+
+`MontyObject` supports JSON serialization with natural mappings:
+
+**Bidirectional (can serialize and deserialize):**
+- `None` ↔ JSON `null`
+- `Bool` ↔ JSON `true`/`false`
+- `Int` ↔ JSON integer
+- `Float` ↔ JSON float
+- `String` ↔ JSON string
+- `List` ↔ JSON array
+- `Dict` ↔ JSON object (keys must be strings)
+
+**Output-only (serialize only, cannot deserialize from JSON):**
+- `Ellipsis` → `{"$ellipsis": true}`
+- `Tuple` → `{"$tuple": [...]}`
+- `Bytes` → `{"$bytes": [...]}`
+- `Exception` → `{"$exception": {"type": "...", "arg": "..."}}`
+- `Repr` → `{"$repr": "..."}`

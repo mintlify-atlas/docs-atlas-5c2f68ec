@@ -1,0 +1,238 @@
+---
+title: Web Scraper
+description: Use Monty to extract structured pricing data from websites with Playwright and BeautifulSoup
+---
+
+## Overview
+
+This example demonstrates using Monty to generate and execute web scraping code. An LLM generates Python code to navigate websites with Playwright and parse HTML with BeautifulSoup, extracting structured pricing data from model provider documentation.
+
+<Note>
+This example uses Pydantic AI to generate code, but avoids the built-in `CodeExecutionToolset` to showcase Monty features not yet available in Pydantic AI, such as iterative execution and type checking.
+</Note>
+
+## Key Features
+
+- **Type-safe external functions**: BeautifulSoup and Playwright APIs exposed as typed dataclasses
+- **Iterative agent loop**: LLM generates code, Monty executes it, results feed back to LLM
+- **Type checking**: Generated code is validated against stubs before execution
+- **Browser automation**: Headless Playwright integration for dynamic web pages
+
+## Architecture
+
+<Steps>
+  <Step title="Generate Type Stubs">
+    Use `stubgen` to create type stubs for external functions, giving the LLM precise type information.
+  </Step>
+  
+  <Step title="LLM Generates Code">
+    The agent receives instructions about available functions and generates Python code to scrape the target site.
+  </Step>
+  
+  <Step title="Type Check & Execute">
+    Monty validates the code against stubs, then executes it with access to `open_page()`, `beautiful_soup()`, and `record_model_info()`.
+  </Step>
+  
+  <Step title="Process Results">
+    If execution succeeds, results are recorded. If it fails, error messages feed back to the LLM for correction.
+  </Step>
+</Steps>
+
+## Example Code Structure
+
+### Main Loop
+
+```python
+import pydantic_monty
+from pydantic_ai import Agent
+
+stubs = f"""
+{RecordModels.record_model_info_stub()}
+{_generate_stubs()}
+"""
+
+instrunctions = f"""
+You MUST return markdown with either a comment and python code to execute
+in a "```python" code block, or an explanation of your process to end.
+
+The runtime uses a restricted Python subset:
+- you cannot use the standard library except builtin functions and the following modules: `sys`, `typing`, `asyncio`
+- you cannot define classes
+
+You can use the following types functions and types:
+
+```python
+{stubs}
+```
+"""
+
+scrape_agent = Agent('gateway/anthropic:claude-sonnet-4-5', instructions=instrunctions)
+```
+
+### Iterative Execution
+
+```python
+async with scrape_agent.iter(prompt) as agent_run:
+    node = agent_run.next_node
+    while True:
+        while not isinstance(node, End):
+            node = await agent_run.next(node)
+
+        extracted = ExtractCode.extract(node.data.output)
+        if not extracted.code:
+            break
+
+        try:
+            m = Monty(
+                extracted.code,
+                type_check=True,
+                type_check_stubs=stubs,
+            )
+        except MontyError as e:
+            msg = f'Error Preparing Code: {e}'
+            node = await agent_run.next(new_node(msg))
+            continue
+
+        try:
+            output = await run_monty_async(
+                m,
+                external_functions={
+                    'open_page': browser.open_page,
+                    'beautiful_soup': beautiful_soup,
+                    'record_model_info': record_models.record_model_info,
+                },
+                print_callback=monty_print,
+            )
+        except MontyRuntimeError as e:
+            msg = f'Error running code: {e.display()}'
+        else:
+            msg = pydantic_core.to_json(output).decode()
+
+        node = await agent_run.next(new_node(msg))
+```
+
+### Generated Code Example
+
+Here's the kind of code Claude Sonnet 4.5 generates for this task:
+
+```python
+import asyncio
+
+# Open the pricing page
+page = await open_page(url)
+
+# Parse the HTML with BeautifulSoup
+soup = beautiful_soup(page.html)
+
+# Find the main content area that contains pricing information
+pricing_tables = soup.find_all('table')
+
+# Initialize a list to store all model pricing data
+all_models = []
+
+# Process each table found
+for table in pricing_tables:
+    # Get all rows in the table
+    rows = table.find_all('tr')
+
+    if len(rows) < 2:  # Skip tables without data rows
+        continue
+
+    # Get headers from the first row
+    header_row = rows[0]
+    headers = [th.get_text(strip=True) for th in header_row.find_all(['th', 'td'])]
+
+    # Process data rows
+    for row in rows[1:]:
+        cells = row.find_all(['td', 'th'])
+        if len(cells) < 2:
+            continue
+
+        # Extract cell values
+        row_data = [cell.get_text(strip=True) for cell in cells]
+
+        # Skip rows that might indicate deprecated models
+        row_text = ' '.join(row_data).lower()
+        if 'deprecated' in row_text or 'legacy' in row_text:
+            continue
+
+        # Create a dictionary for this model
+        model_info = {}
+        for i, value in enumerate(row_data):
+            if i < len(headers):
+                model_info[headers[i]] = value
+            else:
+                model_info[f'column_{i}'] = value
+
+        if model_info:  # Only add if we have data
+            all_models.append(model_info)
+
+# Print the results
+print(f'Found {len(all_models)} models with pricing data')
+print('\nModel pricing information:')
+for i, model in enumerate(all_models, 1):
+    print(f'\n{i}. {model}')
+
+all_models
+```
+
+## External Functions API
+
+### Page Navigation
+
+```python
+async def open_page(
+    url: str,
+    wait_until: Literal['commit', 'domcontentloaded', 'load', 'networkidle'] = 'networkidle',
+) -> Page:
+    """Open a URL in a headless browser and return a Page."""
+```
+
+The `Page` object provides methods like:
+- `go_to(url)` - Navigate to a new URL
+- `click(selector)` - Click an element
+- `fill(selector, value)` - Fill a form field
+- `get_text(selector)` - Extract text content
+- `screenshot()` - Take a screenshot
+
+### HTML Parsing
+
+```python
+def beautiful_soup(html: str) -> Tag:
+    """Parse html with BeautifulSoup and return a Tag."""
+```
+
+The `Tag` object mirrors BeautifulSoup's API:
+- `find(name, attrs)` - Find first matching tag
+- `find_all(name, attrs, limit)` - Find all matching tags
+- `select(selector)` - CSS selector query
+- `get_text(separator, strip)` - Extract text content
+- `children()` - Get direct children
+
+<Warning>
+The HTML returned from web pages can be very large. Always process it with `beautiful_soup()` to extract only the data you need, rather than returning full HTML to the LLM.
+</Warning>
+
+## Running the Example
+
+```bash
+uv run python -m examples.web_scraper.main
+```
+
+The example scrapes pricing data from:
+- OpenAI's pricing page
+- Anthropic's pricing page
+- Groq's pricing page
+
+## Key Takeaways
+
+1. **Code > Tool Calls**: Writing a loop to process tables is more natural than sequential tool calls
+2. **Type Safety**: Type stubs catch errors before execution
+3. **Iterative Refinement**: Failed executions feed errors back to the LLM for correction
+4. **Resource Efficiency**: HTML parsing happens in the sandbox, keeping tokens out of context
+
+## Next Steps
+
+- Explore the full source in `examples/web_scraper/`
+- Try [Data Analysis](/examples/data-analysis) for async patterns
+- See [SQL Playground](/examples/sql-playground) for file mounting

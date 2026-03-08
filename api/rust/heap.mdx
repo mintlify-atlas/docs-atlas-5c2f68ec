@@ -1,0 +1,379 @@
+---
+title: "Heap & Resource Management"
+description: "Key heap-related types and traits for memory management"
+icon: "memory"
+---
+
+# Heap & Resource Management
+
+Monty uses a custom heap implementation for managing Python objects with reference counting and garbage collection. This page documents the key types and traits related to heap management.
+
+## Heap
+
+The heap is the central memory arena for allocating and managing heap-allocated Python values.
+
+### Key Responsibilities
+
+- **Allocation**: Allocates `HeapData` objects and returns `HeapId` references
+- **Reference Counting**: Tracks reference counts for all heap objects
+- **Garbage Collection**: Periodically reclaims unreachable objects
+- **Resource Tracking**: Uses a `ResourceTracker` to enforce memory and allocation limits
+
+### Methods
+
+#### allocate()
+
+Allocates a new heap object and returns its `HeapId`.
+
+<ParamField path="data" type="HeapData" required>
+  The data to allocate on the heap
+</ParamField>
+
+<ResponseField name="Result<HeapId, ResourceError>">
+  Returns the heap ID or a resource error if limits are exceeded
+</ResponseField>
+
+```rust
+use monty::heap::{Heap, HeapData};
+use monty::types::Str;
+use monty::resource::NoLimitTracker;
+
+let mut heap = Heap::new(1024, NoLimitTracker);
+let str_id = heap.allocate(HeapData::Str(Str::new("hello".to_owned()))).unwrap();
+```
+
+#### get()
+
+Retrieves a reference to a heap object by its `HeapId`.
+
+<ParamField path="id" type="HeapId" required>
+  The heap ID of the object to retrieve
+</ParamField>
+
+<ResponseField name="&HeapData">
+  An immutable reference to the heap data
+</ResponseField>
+
+```rust
+use monty::heap::{Heap, HeapData};
+
+let heap = /* ... */;
+let id = /* ... */;
+let data = heap.get(id);
+```
+
+#### get_mut()
+
+Retrieves a mutable reference to a heap object by its `HeapId`.
+
+<ParamField path="id" type="HeapId" required>
+  The heap ID of the object to retrieve
+</ParamField>
+
+<ResponseField name="&mut HeapData">
+  A mutable reference to the heap data
+</ResponseField>
+
+#### clone_with_heap()
+
+Clones a value while properly incrementing reference counts for any heap-allocated components.
+
+<ParamField path="value" type="&Value" required>
+  The value to clone
+</ParamField>
+
+<ResponseField name="Value">
+  The cloned value with incremented reference counts
+</ResponseField>
+
+```rust
+use monty::value::Value;
+use monty::heap::Heap;
+
+let heap = /* ... */;
+let value = /* ... */;
+let cloned = value.clone_with_heap(&heap);
+```
+
+#### drop_with_heap()
+
+Drops a value while properly decrementing reference counts for any heap-allocated components.
+
+This is the **correct way** to drop a `Value` that may contain heap references.
+
+<ParamField path="value" type="Value" required>
+  The value to drop (consumes ownership)
+</ParamField>
+
+<ParamField path="heap" type="&mut Heap" required>
+  Mutable reference to the heap for decrementing reference counts
+</ParamField>
+
+<Warning>
+  All types that implement `DropWithHeap` hold heap references and **must** be cleaned up correctly on every code path. Use `defer_drop!` macro or `HeapGuard` to ensure cleanup on all paths (normal returns, early returns via `?`, `continue`, etc.).
+</Warning>
+
+```rust
+use monty::value::Value;
+use monty::heap::Heap;
+
+let mut heap = /* ... */;
+let value = /* ... */;
+value.drop_with_heap(&mut heap);
+```
+
+## HeapId
+
+An opaque identifier for a heap-allocated object.
+
+Heap IDs are used to reference objects in the heap without directly holding pointers. This enables safe serialization, garbage collection, and reference counting.
+
+## HeapData
+
+The actual data stored in the heap. This is an enum containing all heap-allocated Python types:
+
+<ParamField path="Str(Str)" type="HeapData">
+  Heap-allocated string
+</ParamField>
+
+<ParamField path="Bytes(Bytes)" type="HeapData">
+  Heap-allocated bytes object
+</ParamField>
+
+<ParamField path="List(List)" type="HeapData">
+  Heap-allocated list
+</ParamField>
+
+<ParamField path="Tuple(Tuple)" type="HeapData">
+  Heap-allocated tuple
+</ParamField>
+
+<ParamField path="Dict(Dict)" type="HeapData">
+  Heap-allocated dictionary
+</ParamField>
+
+<ParamField path="Set(Set)" type="HeapData">
+  Heap-allocated set
+</ParamField>
+
+<ParamField path="FrozenSet(FrozenSet)" type="HeapData">
+  Heap-allocated frozenset
+</ParamField>
+
+<ParamField path="LongInt(LongInt)" type="HeapData">
+  Heap-allocated arbitrary-precision integer
+</ParamField>
+
+<ParamField path="NamedTuple(NamedTuple)" type="HeapData">
+  Heap-allocated named tuple
+</ParamField>
+
+<ParamField path="Dataclass(Dataclass)" type="HeapData">
+  Heap-allocated dataclass instance
+</ParamField>
+
+<ParamField path="Exception(SimpleException)" type="HeapData">
+  Heap-allocated exception object
+</ParamField>
+
+<ParamField path="Path(Path)" type="HeapData">
+  Heap-allocated path object
+</ParamField>
+
+<ParamField path="Cell(Cell)" type="HeapData">
+  Heap-allocated cell (for closures)
+</ParamField>
+
+<ParamField path="Closure(Closure)" type="HeapData">
+  Heap-allocated closure
+</ParamField>
+
+<ParamField path="Coroutine(Coroutine)" type="HeapData">
+  Heap-allocated coroutine
+</ParamField>
+
+<ParamField path="Range(Range)" type="HeapData">
+  Heap-allocated range object
+</ParamField>
+
+<ParamField path="Iter(Iter)" type="HeapData">
+  Heap-allocated iterator
+</ParamField>
+
+<ParamField path="Module(Module)" type="HeapData">
+  Heap-allocated module
+</ParamField>
+
+## ResourceTracker
+
+A trait for tracking and enforcing resource limits during execution.
+
+### Methods
+
+#### track_allocation()
+
+Called before each heap allocation to check if limits allow the allocation.
+
+<ParamField path="size" type="usize" required>
+  The size of the allocation in bytes
+</ParamField>
+
+<ResponseField name="Result<(), ResourceError>">
+  Returns `Ok(())` if the allocation is allowed, or a `ResourceError` if limits are exceeded
+</ResponseField>
+
+#### check_time()
+
+Called periodically to check if execution time limits have been exceeded.
+
+<ResponseField name="Result<(), ResourceError>">
+  Returns `Ok(())` if execution should continue, or a `ResourceError` if time limits are exceeded
+</ResponseField>
+
+### Implementations
+
+#### NoLimitTracker
+
+A no-op resource tracker that allows unlimited allocations and execution time.
+
+```rust
+use monty::resource::NoLimitTracker;
+use monty::{MontyRun, MontyObject, PrintWriter};
+
+let runner = MontyRun::new(
+    "x + 1".to_owned(),
+    "test.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+let result = runner.run(
+    vec![MontyObject::Int(41)],
+    NoLimitTracker,
+    &mut PrintWriter::Stdout
+).unwrap();
+```
+
+#### Custom Trackers
+
+You can implement your own `ResourceTracker` to enforce custom limits:
+
+```rust
+use monty::resource::{ResourceTracker, ResourceError};
+
+struct MyTracker {
+    max_allocations: usize,
+    allocations: usize,
+}
+
+impl ResourceTracker for MyTracker {
+    fn track_allocation(&mut self, _size: usize) -> Result<(), ResourceError> {
+        self.allocations += 1;
+        if self.allocations > self.max_allocations {
+            Err(ResourceError::TooManyAllocations)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn check_time(&mut self) -> Result<(), ResourceError> {
+        Ok(())
+    }
+}
+```
+
+## PyTrait
+
+The core trait implemented by all Python types (`Value`, `HeapData`).
+
+### Methods
+
+#### py_type()
+
+Returns the Python type of this value.
+
+<ResponseField name="Type">
+  The type enum variant (e.g., `Type::Int`, `Type::Str`)
+</ResponseField>
+
+#### py_len()
+
+Returns the length of this value if it's a sequence or collection.
+
+<ResponseField name="Option<usize>">
+  The length, or `None` if the type doesn't support `len()`
+</ResponseField>
+
+#### py_bool()
+
+Returns the truthiness of this value according to Python's truth testing rules.
+
+<ResponseField name="bool">
+  True if the value is truthy
+</ResponseField>
+
+#### py_repr()
+
+Returns the `repr()` string for this value.
+
+<ResponseField name="Cow<'static, str>">
+  The repr string (may be owned or borrowed)
+</ResponseField>
+
+#### py_str()
+
+Returns the `str()` string for this value.
+
+<ResponseField name="Cow<'static, str>">
+  The str string (may be owned or borrowed)
+</ResponseField>
+
+## Reference Counting Safety
+
+All types that implement `DropWithHeap` hold heap references and **must** be cleaned up correctly on every code path. There are three mechanisms for ensuring this:
+
+### 1. `defer_drop!` macro (preferred)
+
+The simplest and safest approach. Use `defer_drop!` to bind a value into a guard that automatically drops it when scope exits.
+
+```rust
+let value = self.pop();
+defer_drop!(value, heap);          // value is now &Value, heap is now &mut Heap
+let result = value.py_repr(heap)?; // guard handles cleanup on all paths
+```
+
+Use `defer_drop_mut!` when you need a mutable reference:
+
+```rust
+let iter = vm.heap.get_iter(iter_ref);
+defer_drop_mut!(iter, vm);
+while let Some(item) = iter.for_next(vm)? { /* ... */ }
+```
+
+### 2. `HeapGuard` (when you need control)
+
+Use `HeapGuard` directly when you need to conditionally extract the value instead of dropping it.
+
+```rust
+let mut lhs_guard = HeapGuard::new(self.pop(), self);
+let (lhs, this) = lhs_guard.as_parts_mut();
+
+if lhs.py_iadd(rhs, this.heap)? {
+    let (lhs, this) = lhs_guard.into_parts(); // reclaim lhs, don't drop
+    this.push(lhs);
+    return Ok(());
+}
+// otherwise lhs_guard drops lhs automatically at scope exit
+```
+
+### 3. Manual `drop_with_heap` (simple cases only)
+
+For very simple cases with a single linear code path:
+
+```rust
+let iter = self.pop();
+iter.drop_with_heap(&mut self.heap); // single path, no branching
+```
+
+<Warning>
+  Avoid manual `drop_with_heap` whenever there are multiple code paths (branching, `?`, `continue`, early returns) between acquiring and releasing the value.
+</Warning>

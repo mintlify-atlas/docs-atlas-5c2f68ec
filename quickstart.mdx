@@ -1,80 +1,557 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get started with Monty in minutes
 ---
 
-## Get started in three steps
+This guide will walk you through the basics of using Monty to execute Python code safely in your applications.
 
-Get your documentation site running locally and make your first customization.
+## Choose Your Language
 
-### Step 1: Set up your local environment
+<Tabs>
+  <Tab title="Python">
+    ## Basic Expression Evaluation
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+    Start by running a simple Python expression:
+
+    ```python
+    import pydantic_monty
+
+    # Create interpreter with code
+    m = pydantic_monty.Monty('1 + 2')
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    # Execute and get result
+    result = m.run()
+    print(result)
+    # Output: 3
+    ```
+
+    ## Using Input Variables
+
+    Pass variables to your code:
+
+    ```python
+    import pydantic_monty
+
+    # Define code that uses input variables
+    m = pydantic_monty.Monty('x * y', inputs=['x', 'y'])
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    # Run with different inputs
+    print(m.run(inputs={'x': 2, 'y': 3}))
+    # Output: 6
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    print(m.run(inputs={'x': 10, 'y': 5}))
+    # Output: 50
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    ## External Functions
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    Call host functions from your sandboxed code:
 
-### Step 3: Go live
+    ```python
+    import pydantic_monty
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    # Code that calls an external function
+    m = pydantic_monty.Monty('double(x)', inputs=['x'])
+    
+    # Provide the external function implementation
+    result = m.run(
+        inputs={'x': 5},
+        external_functions={'double': lambda x: x * 2}
+    )
+    print(result)
+    # Output: 10
+    ```
 
-## Next steps
+    ## Iterative Execution
 
-Now that you have your docs running, explore these key features:
+    For fine-grained control over external function calls:
+
+    ```python
+    import pydantic_monty
+
+    code = """
+    data = fetch(url)
+    len(data)
+    """
+
+    m = pydantic_monty.Monty(code, inputs=['url'])
+
+    # Start execution - pauses at fetch() call
+    result = m.start(inputs={'url': 'https://example.com'})
+
+    print(type(result))
+    # Output: <class 'pydantic_monty.FunctionSnapshot'>
+    
+    print(result.function_name)
+    # Output: fetch
+    
+    print(result.args)
+    # Output: ('https://example.com',)
+
+    # Perform the actual fetch, then resume
+    result = result.resume(return_value='hello world')
+
+    print(type(result))
+    # Output: <class 'pydantic_monty.MontyComplete'>
+    
+    print(result.output)
+    # Output: 11
+    ```
+
+    ## Async External Functions
+
+    Use async/await with external functions:
+
+    ```python
+    import asyncio
+    from typing import Any
+    import pydantic_monty
+
+    code = """
+    async def agent(prompt: str, messages: Messages):
+        while True:
+            print(f'messages so far: {messages}')
+            output = await call_llm(prompt, messages)
+            if isinstance(output, str):
+                return output
+            messages.extend(output)
+
+    await agent(prompt, [])
+    """
+
+    type_definitions = """
+    from typing import Any
+
+    Messages = list[dict[str, Any]]
+
+    async def call_llm(prompt: str, messages: Messages) -> str | Messages:
+        raise NotImplementedError()
+
+    prompt: str = ''
+    """
+
+    m = pydantic_monty.Monty(
+        code,
+        inputs=['prompt'],
+        script_name='agent.py',
+        type_check=True,
+        type_check_stubs=type_definitions,
+    )
+
+    Messages = list[dict[str, Any]]
+
+    async def call_llm(prompt: str, messages: Messages) -> str | Messages:
+        if len(messages) < 2:
+            return [{'role': 'system', 'content': 'example response'}]
+        else:
+            return f'example output, message count {len(messages)}'
+
+    async def main():
+        output = await pydantic_monty.run_monty_async(
+            m,
+            inputs={'prompt': 'testing'},
+            external_functions={'call_llm': call_llm},
+        )
+        print(output)
+        # Output: example output, message count 2
+
+    asyncio.run(main())
+    ```
+
+    ## Resource Limits
+
+    Control resource usage to prevent runaway execution:
+
+    ```python
+    import pydantic_monty
+
+    m = pydantic_monty.Monty('x + y', inputs=['x', 'y'])
+
+    # Set resource limits
+    limits = pydantic_monty.ResourceLimits(
+        max_duration_secs=1.0,
+        max_allocations=10000,
+        max_memory=1024 * 1024  # 1MB
+    )
+
+    result = m.run(
+        inputs={'x': 1, 'y': 2},
+        limits=limits
+    )
+    print(result)
+    # Output: 3
+    ```
+  </Tab>
+
+  <Tab title="JavaScript">
+    ## Basic Expression Evaluation
+
+    Start by running a simple Python expression:
+
+    ```typescript
+    import { Monty } from '@pydantic/monty'
+
+    // Create interpreter and run code
+    const m = new Monty('1 + 2')
+    const result = m.run()
+    console.log(result)
+    // Output: 3
+    ```
+
+    ## Using Input Variables
+
+    Pass variables to your code:
+
+    ```typescript
+    import { Monty } from '@pydantic/monty'
+
+    const m = new Monty('x + y', { inputs: ['x', 'y'] })
+    const result = m.run({ inputs: { x: 10, y: 20 } })
+    console.log(result)
+    // Output: 30
+    ```
+
+    ## External Functions
+
+    Call host functions from your sandboxed code:
+
+    ```typescript
+    import { Monty } from '@pydantic/monty'
+
+    const m = new Monty('add(2, 3)')
+
+    const result = m.run({
+      externalFunctions: {
+        add: (a: number, b: number) => a + b,
+      },
+    })
+    console.log(result)
+    // Output: 5
+    ```
+
+    ## Async External Functions
+
+    Use async functions with the `runMontyAsync` helper:
+
+    ```typescript
+    import { Monty, runMontyAsync } from '@pydantic/monty'
+
+    const m = new Monty('fetch_data(url)', {
+      inputs: ['url'],
+    })
+
+    const result = await runMontyAsync(m, {
+      inputs: { url: 'https://example.com' },
+      externalFunctions: {
+        fetch_data: async (url: string) => {
+          const response = await fetch(url)
+          return response.text()
+        },
+      },
+    })
+    console.log(result)
+    ```
+
+    ## Iterative Execution
+
+    For fine-grained control over external function calls:
+
+    ```typescript
+    import { Monty, MontySnapshot } from '@pydantic/monty'
+
+    const m = new Monty('a() + b()')
+
+    let progress = m.start()
+    while (progress instanceof MontySnapshot) {
+      console.log(`Calling: ${progress.functionName}`)
+      console.log(`Args: ${progress.args}`)
+      // Provide the return value and resume
+      progress = progress.resume({ returnValue: 10 })
+    }
+    // progress is now MontyComplete
+    console.log(progress.output)
+    // Output: 20
+    ```
+
+    ## Resource Limits
+
+    Control resource usage to prevent runaway execution:
+
+    ```typescript
+    import { Monty } from '@pydantic/monty'
+
+    const m = new Monty('1 + 1')
+    const result = m.run({
+      limits: {
+        maxAllocations: 10000,
+        maxDurationSecs: 5,
+        maxMemory: 1024 * 1024, // 1MB
+        maxRecursionDepth: 100,
+      },
+    })
+    console.log(result)
+    // Output: 2
+    ```
+
+    ## Error Handling
+
+    Handle different types of errors:
+
+    ```typescript
+    import {
+      Monty,
+      MontySyntaxError,
+      MontyRuntimeError,
+      MontyTypingError
+    } from '@pydantic/monty'
+
+    try {
+      const m = new Monty('1 / 0')
+      m.run()
+    } catch (error) {
+      if (error instanceof MontySyntaxError) {
+        console.log('Syntax error:', error.message)
+      } else if (error instanceof MontyRuntimeError) {
+        console.log('Runtime error:', error.message)
+        console.log('Traceback:', error.traceback())
+      } else if (error instanceof MontyTypingError) {
+        console.log('Type error:', error.displayDiagnostics())
+      }
+    }
+    ```
+  </Tab>
+
+  <Tab title="Rust">
+    ## Basic Expression Evaluation
+
+    Start by running a simple Python expression:
+
+    ```rust
+    use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+    let code = "1 + 2";
+    let runner = MontyRun::new(
+        code.to_owned(),
+        "main.py",
+        vec![]
+    ).unwrap();
+    
+    let result = runner.run(
+        vec![],
+        NoLimitTracker,
+        &mut PrintWriter::Stdout
+    ).unwrap();
+    
+    assert_eq!(result, MontyObject::Int(3));
+    ```
+
+    ## Using Input Variables
+
+    Pass variables to your code:
+
+    ```rust
+    use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+    let code = "x + y";
+    let runner = MontyRun::new(
+        code.to_owned(),
+        "main.py",
+        vec!["x".to_owned(), "y".to_owned()]
+    ).unwrap();
+    
+    let result = runner.run(
+        vec![MontyObject::Int(10), MontyObject::Int(20)],
+        NoLimitTracker,
+        &mut PrintWriter::Stdout
+    ).unwrap();
+    
+    assert_eq!(result, MontyObject::Int(30));
+    ```
+
+    ## Fibonacci Example
+
+    A more complex example with function definitions:
+
+    ```rust
+    use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+    let code = r#"
+    def fib(n):
+        if n <= 1:
+            return n
+        return fib(n - 1) + fib(n - 2)
+
+    fib(x)
+    "#;
+
+    let runner = MontyRun::new(
+        code.to_owned(),
+        "fib.py",
+        vec!["x".to_owned()]
+    ).unwrap();
+    
+    let result = runner.run(
+        vec![MontyObject::Int(10)],
+        NoLimitTracker,
+        &mut PrintWriter::Stdout
+    ).unwrap();
+    
+    assert_eq!(result, MontyObject::Int(55));
+    ```
+
+    ## Serialization
+
+    Save and restore parsed code:
+
+    ```rust
+    use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+    // Serialize parsed code
+    let runner = MontyRun::new(
+        "x + 1".to_owned(),
+        "main.py",
+        vec!["x".to_owned()]
+    ).unwrap();
+    let bytes = runner.dump().unwrap();
+
+    // Later, restore and run
+    let runner2 = MontyRun::load(&bytes).unwrap();
+    let result = runner2.run(
+        vec![MontyObject::Int(41)],
+        NoLimitTracker,
+        &mut PrintWriter::Stdout
+    ).unwrap();
+    
+    assert_eq!(result, MontyObject::Int(42));
+    ```
+  </Tab>
+</Tabs>
+
+## Key Concepts
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Inputs" icon="arrow-right-to-bracket">
+    Variables you want to pass into the sandboxed code. Declare them when creating the interpreter.
+  </Card>
+  
+  <Card title="External Functions" icon="function">
+    Host functions that sandboxed code can call. These are the only way for Monty code to interact with the outside world.
+  </Card>
+  
+  <Card title="Resource Limits" icon="gauge-high">
+    Control execution time, memory usage, and allocations to prevent runaway code.
+  </Card>
+  
+  <Card title="Snapshots" icon="floppy-disk">
+    Pause execution at external function calls and resume later, even across process boundaries.
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Common Patterns
+
+### Agent Workflow Example
+
+Here's a real-world example of using Monty for an agent workflow:
+
+<CodeGroup>
+```python Python
+import asyncio
+from typing import Any
+import pydantic_monty
+
+Messages = list[dict[str, Any]]
+
+code = """
+async def agent(prompt: str):
+    messages = []
+    while True:
+        output = await call_llm(prompt, messages)
+        if isinstance(output, str):
+            return output
+        messages.extend(output)
+
+await agent(prompt)
+"""
+
+m = pydantic_monty.Monty(
+    code,
+    inputs=['prompt'],
+    script_name='agent.py'
+)
+
+async def call_llm(prompt: str, messages: Messages) -> str | Messages:
+    # Your LLM logic here
+    if len(messages) < 2:
+        return [{'role': 'system', 'content': 'response'}]
+    else:
+        return f'Final answer based on {len(messages)} messages'
+
+async def main():
+    result = await pydantic_monty.run_monty_async(
+        m,
+        inputs={'prompt': 'What is the weather?'},
+        external_functions={'call_llm': call_llm}
+    )
+    print(result)
+
+asyncio.run(main())
+```
+
+```typescript TypeScript
+import { Monty, runMontyAsync, MontySnapshot } from '@pydantic/monty'
+
+type Messages = Array<{ role: string; content: string }>
+
+const code = `
+async def agent(prompt: str):
+    messages = []
+    while True:
+        output = await call_llm(prompt, messages)
+        if isinstance(output, str):
+            return output
+        messages.extend(output)
+
+await agent(prompt)
+`
+
+const m = new Monty(code, {
+  inputs: ['prompt'],
+  scriptName: 'agent.js'
+})
+
+async function callLlm(prompt: string, messages: Messages): Promise<string | Messages> {
+  // Your LLM logic here
+  if (messages.length < 2) {
+    return [{ role: 'system', content: 'response' }]
+  } else {
+    return `Final answer based on ${messages.length} messages`
+  }
+}
+
+const result = await runMontyAsync(m, {
+  inputs: { prompt: 'What is the weather?' },
+  externalFunctions: { call_llm: callLlm }
+})
+console.log(result)
+```
+</CodeGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/concepts/security">
+    Learn more about Monty's core features
+  </Card>
+  
+  <Card title="External Functions" icon="plug" href="/guides/external-functions">
+    Deep dive into external function handling
+  </Card>
+  
+  <Card title="Resource Limits" icon="shield" href="/concepts/resource-limits">
+    Configure resource limits for safety
+  </Card>
+  
+  <Card title="Type Checking" icon="check" href="/guides/type-checking">
+    Use static type checking with your code
+  </Card>
+</CardGroup>

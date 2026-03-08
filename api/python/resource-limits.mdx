@@ -1,0 +1,202 @@
+---
+title: ResourceLimits
+description: Configuration for resource limits during code execution
+---
+
+The `ResourceLimits` type is a `TypedDict` that configures resource constraints for Monty code execution. All limits are optional - omit a key to disable that limit.
+
+## Type Definition
+
+```python
+class ResourceLimits(TypedDict, total=False):
+    """Configuration for resource limits during code execution."""
+    
+    max_allocations: int
+    max_duration_secs: float
+    max_memory: int
+    gc_interval: int
+    max_recursion_depth: int
+```
+
+## Fields
+
+<ParamField path="max_allocations" type="int">
+  Maximum number of heap allocations allowed. Execution will be terminated if this limit is exceeded.
+</ParamField>
+
+<ParamField path="max_duration_secs" type="float">
+  Maximum execution time in seconds. Execution will be terminated if it exceeds this duration.
+</ParamField>
+
+<ParamField path="max_memory" type="int">
+  Maximum heap memory in bytes. Execution will be terminated if memory usage exceeds this limit.
+</ParamField>
+
+<ParamField path="gc_interval" type="int">
+  Run garbage collection every N allocations. This helps control memory usage by periodically cleaning up unused objects.
+</ParamField>
+
+<ParamField path="max_recursion_depth" type="int">
+  Maximum function call stack depth. Default is 1000. This prevents infinite recursion from exhausting system resources.
+</ParamField>
+
+## Usage Examples
+
+### Basic Time Limit
+
+```python
+import pydantic_monty
+
+m = pydantic_monty.Monty('x + y', inputs=['x', 'y'])
+
+# Set a 1-second time limit
+limits = pydantic_monty.ResourceLimits(max_duration_secs=1.0)
+result = m.run(inputs={'x': 1, 'y': 2}, limits=limits)
+print(result)
+# Output: 3
+```
+
+### Multiple Limits
+
+```python
+import pydantic_monty
+
+code = """
+result = []
+for i in range(1000):
+    result.append(i * 2)
+len(result)
+"""
+
+m = pydantic_monty.Monty(code)
+
+# Combine multiple resource limits
+limits = pydantic_monty.ResourceLimits(
+    max_duration_secs=2.0,
+    max_allocations=10000,
+    max_memory=1024 * 1024 * 10,  # 10 MB
+    gc_interval=500,
+    max_recursion_depth=100
+)
+
+result = m.run(limits=limits)
+print(result)
+# Output: 1000
+```
+
+### Preventing Infinite Loops
+
+```python
+import pydantic_monty
+
+code = """
+count = 0
+while True:
+    count += 1
+    if count > 1000:
+        break
+count
+"""
+
+m = pydantic_monty.Monty(code)
+
+# Limit execution time to prevent infinite loops
+limits = pydantic_monty.ResourceLimits(
+    max_duration_secs=0.1,
+    max_allocations=5000
+)
+
+try:
+    result = m.run(limits=limits)
+    print(result)
+except pydantic_monty.MontyRuntimeError as e:
+    print(f"Execution limited: {e}")
+```
+
+### Memory-Intensive Operations
+
+```python
+import pydantic_monty
+
+code = """
+data = [i for i in range(10000)]
+sum(data)
+"""
+
+m = pydantic_monty.Monty(code)
+
+# Control memory usage with allocation limits and garbage collection
+limits = pydantic_monty.ResourceLimits(
+    max_allocations=20000,
+    max_memory=1024 * 1024 * 5,  # 5 MB
+    gc_interval=1000  # Run GC every 1000 allocations
+)
+
+result = m.run(limits=limits)
+print(result)
+# Output: 49995000
+```
+
+### Recursion Depth Control
+
+```python
+import pydantic_monty
+
+code = """
+def fibonacci(n):
+    if n <= 1:
+        return n
+    return fibonacci(n - 1) + fibonacci(n - 2)
+
+fibonacci(10)
+"""
+
+m = pydantic_monty.Monty(code)
+
+# Limit recursion depth
+limits = pydantic_monty.ResourceLimits(
+    max_recursion_depth=50,
+    max_duration_secs=1.0
+)
+
+result = m.run(limits=limits)
+print(result)
+# Output: 55
+```
+
+## Error Handling
+
+When a resource limit is exceeded, a `MontyRuntimeError` is raised:
+
+```python
+import pydantic_monty
+
+code = """
+while True:
+    pass
+"""
+
+m = pydantic_monty.Monty(code)
+limits = pydantic_monty.ResourceLimits(max_duration_secs=0.01)
+
+try:
+    m.run(limits=limits)
+except pydantic_monty.MontyRuntimeError as e:
+    print(f"Resource limit exceeded: {e}")
+    # Get detailed traceback
+    print(e.display(format='traceback'))
+```
+
+## Best Practices
+
+1. **Always set time limits** when executing untrusted code to prevent infinite loops
+2. **Use allocation limits** to prevent memory exhaustion attacks
+3. **Configure GC intervals** for long-running or memory-intensive code
+4. **Set recursion depth** lower than default (1000) when running untrusted code
+5. **Combine multiple limits** for defense in depth
+6. **Test limits** with representative workloads to find appropriate values
+
+## Related
+
+- [Monty class](/api/python/monty) - Main class that accepts ResourceLimits
+- [Errors](/api/python/errors) - Error types raised when limits are exceeded

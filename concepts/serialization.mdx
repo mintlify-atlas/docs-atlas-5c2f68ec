@@ -1,0 +1,448 @@
+---
+title: Serialization
+description: Serialize and restore Monty instances and execution snapshots
+---
+
+## Overview
+
+Monty supports serialization of both parsed code and execution state, enabling:
+
+- **Code caching**: Parse once, serialize, reuse later
+- **Execution suspension**: Pause execution, save state, resume later
+- **Process migration**: Move execution between processes or machines
+- **Persistent workflows**: Store long-running computations in databases
+
+<Note>
+Serialization uses the [postcard](https://docs.rs/postcard/) format - a compact, binary encoding designed for embedded systems.
+</Note>
+
+## Serializing Monty Instances
+
+### Caching Parsed Code
+
+Parsing and compiling Python code has overhead. Serialize a `Monty` instance to avoid re-parsing:
+
+<CodeGroup>
+```python Python
+import pydantic_monty
+
+# Parse and compile once
+m = pydantic_monty.Monty('x ** 2 + y', inputs=['x', 'y'])
+
+# Serialize to bytes
+data: bytes = m.dump()
+print(f"Serialized size: {len(data)} bytes")
+
+# Save to file/database/cache
+with open('cached_code.monty', 'wb') as f:
+    f.write(data)
+
+# Later, restore from bytes
+with open('cached_code.monty', 'rb') as f:
+    data = f.read()
+
+m2 = pydantic_monty.Monty.load(data)
+
+# Run immediately without re-parsing
+result = m2.run(inputs={'x': 5, 'y': 3})
+print(result)  # 28
+```
+
+```typescript TypeScript
+import { Monty } from '@pydantic/monty';
+import fs from 'fs';
+
+// Parse and compile once
+const m = new Monty('x ** 2 + y', { inputs: ['x', 'y'] });
+
+// Serialize to bytes
+const data: Uint8Array = m.dump();
+console.log(`Serialized size: ${data.length} bytes`);
+
+// Save to file
+fs.writeFileSync('cached_code.monty', data);
+
+// Later, restore from bytes
+const loadedData = fs.readFileSync('cached_code.monty');
+const m2 = Monty.load(loadedData);
+
+// Run immediately
+const result = m2.run({ inputs: { x: 5, y: 3 } });
+console.log(result); // 28
+```
+
+```rust Rust
+use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+use std::fs;
+
+// Parse and compile once
+let runner = MontyRun::new(
+    "x ** 2 + y".to_owned(),
+    "script.py",
+    vec!["x".to_owned(), "y".to_owned()]
+).unwrap();
+
+// Serialize to bytes
+let data = runner.dump().unwrap();
+println!("Serialized size: {} bytes", data.len());
+
+// Save to file
+fs::write("cached_code.monty", &data).unwrap();
+
+// Later, restore from bytes
+let data = fs::read("cached_code.monty").unwrap();
+let runner2 = MontyRun::load(&data).unwrap();
+
+// Run immediately
+let result = runner2.run(
+    vec![MontyObject::Int(5), MontyObject::Int(3)],
+    NoLimitTracker,
+    &mut PrintWriter::Stdout
+).unwrap();
+
+assert_eq!(result, MontyObject::Int(28));
+```
+</CodeGroup>
+
+### What Gets Serialized
+
+When you serialize a `Monty` instance, it includes:
+
+- Compiled bytecode for all functions
+- Interned strings (variable names, constants)
+- Namespace size and structure
+- Type checking information (if enabled)
+
+<Warning>
+The original source code **is included** in serialized data for error reporting. If your code contains sensitive information, encrypt the serialized bytes.
+</Warning>
+
+## Serializing Execution State
+
+When using [iterative execution](/concepts/execution-modes#iterative-execution), you can serialize snapshots at any suspension point.
+
+### Basic Snapshot Serialization
+
+<CodeGroup>
+```python Python
+import pydantic_monty
+
+code = """
+data = fetch(url)
+processed = transform(data)
+len(processed)
+"""
+
+m = pydantic_monty.Monty(code, inputs=['url'])
+
+# Start execution
+progress = m.start(inputs={'url': 'https://example.com'})
+
+# Execution paused at fetch() call
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    # Serialize the execution state
+    snapshot_data = progress.dump()
+    
+    # Save to database, send over network, etc.
+    save_to_database(snapshot_data)
+
+# Later, in a different process...
+snapshot_data = load_from_database()
+
+# Restore execution state
+progress = pydantic_monty.FunctionSnapshot.load(snapshot_data)
+
+# Continue execution
+result = progress.resume(return_value='fetched data')
+```
+
+```typescript TypeScript
+import { Monty, MontySnapshot } from '@pydantic/monty';
+
+const code = `
+data = fetch(url)
+processed = transform(data)
+len(processed)
+`;
+
+const m = new Monty(code, {
+  inputs: ['url'],
+  externalFunctions: ['fetch', 'transform']
+});
+
+// Start execution
+let progress = m.start({ inputs: { url: 'https://example.com' } });
+
+// Execution paused at fetch() call
+if (progress instanceof MontySnapshot) {
+  // Serialize the execution state
+  const snapshotData: Uint8Array = progress.dump();
+  
+  // Save to file/database
+  saveToDatabase(snapshotData);
+}
+
+// Later, in a different process...
+const snapshotData = loadFromDatabase();
+
+// Restore execution state
+progress = MontySnapshot.load(snapshotData);
+
+// Continue execution
+const result = progress.resume({ returnValue: 'fetched data' });
+```
+</CodeGroup>
+
+### What Gets Serialized in Snapshots
+
+Execution snapshots include:
+
+- **VM State**: Instruction pointer, call stack, exception handlers
+- **Heap**: All allocated objects (strings, lists, dicts, etc.)
+- **Namespaces**: All variable bindings (global and local)
+- **Resource Tracker**: Allocation counts, memory usage, time limits
+- **Compiled Code**: Bytecode and interns (same as Monty instance)
+
+<Info>
+**Time limits are reset** when deserializing execution state. The timer starts from zero after calling `load()`.
+</Info>
+
+## Snapshot Types
+
+All snapshot types support serialization:
+
+### FunctionSnapshot
+
+Paused at external function call:
+
+```python
+progress = m.start(inputs={'x': 42})
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    data = progress.dump()
+    # ... later ...
+    restored = pydantic_monty.FunctionSnapshot.load(data)
+    result = restored.resume(return_value=100)
+```
+
+### OsSnapshot
+
+Paused at OS operation:
+
+```python
+if isinstance(progress, pydantic_monty.OsSnapshot):
+    data = progress.dump()
+    # ... later ...
+    restored = pydantic_monty.OsSnapshot.load(data)
+    result = restored.resume(return_value='/path/exists')
+```
+
+### NameLookupSnapshot
+
+Paused at name resolution:
+
+```python
+if isinstance(progress, pydantic_monty.NameLookupSnapshot):
+    data = progress.dump()
+    # ... later ...
+    restored = pydantic_monty.NameLookupSnapshot.load(data)
+    result = restored.resume(value=some_function)
+```
+
+## Use Cases
+
+### 1. Distributed Execution
+
+Execute expensive computations across multiple workers:
+
+```python
+import pydantic_monty
+import redis
+
+code = """
+result = expensive_computation(data)
+final = another_computation(result)
+final
+"""
+
+def worker_1():
+    m = pydantic_monty.Monty(code, inputs=['data'])
+    progress = m.start(inputs={'data': [1, 2, 3]})
+    
+    # Save to Redis
+    redis_client.set('task:123', progress.dump())
+
+def worker_2():
+    # Different process/machine
+    data = redis_client.get('task:123')
+    progress = pydantic_monty.FunctionSnapshot.load(data)
+    
+    # Continue execution
+    result = progress.resume(return_value=42)
+```
+
+### 2. Long-Running Workflows
+
+Persist execution state for workflows that take hours or days:
+
+```python
+import pydantic_monty
+import sqlite3
+
+def save_workflow_state(workflow_id: str, progress):
+    conn = sqlite3.connect('workflows.db')
+    conn.execute(
+        'UPDATE workflows SET state = ? WHERE id = ?',
+        (progress.dump(), workflow_id)
+    )
+    conn.commit()
+
+def resume_workflow(workflow_id: str):
+    conn = sqlite3.connect('workflows.db')
+    row = conn.execute(
+        'SELECT state FROM workflows WHERE id = ?',
+        (workflow_id,)
+    ).fetchone()
+    
+    progress = pydantic_monty.FunctionSnapshot.load(row[0])
+    # Continue execution
+    return progress.resume(return_value=get_data())
+```
+
+### 3. Interactive Debugging
+
+Pause execution, inspect state, then continue:
+
+```python
+progress = m.start(inputs={'x': 5})
+
+# Save snapshot
+snapshot = progress.dump()
+
+# Try different return values
+for test_value in [10, 20, 30]:
+    # Restore from same snapshot each time
+    p = pydantic_monty.FunctionSnapshot.load(snapshot)
+    result = p.resume(return_value=test_value)
+    print(f"With {test_value}: {result}")
+```
+
+### 4. Code Template Caching
+
+Pre-parse code templates and cache them:
+
+```python
+import pydantic_monty
+from functools import lru_cache
+
+@lru_cache(maxsize=100)
+def get_cached_monty(code_template: str) -> bytes:
+    m = pydantic_monty.Monty(code_template, inputs=['data'])
+    return m.dump()
+
+def execute_template(code_template: str, data):
+    cached_bytes = get_cached_monty(code_template)
+    m = pydantic_monty.Monty.load(cached_bytes)
+    return m.run(inputs={'data': data})
+```
+
+## Security Considerations
+
+<Warning>
+**Critical**: Only deserialize data from **trusted sources**. 
+
+Deserializing malicious snapshot data can:
+- Restore arbitrary execution state
+- Execute malicious code when resumed
+- Bypass resource limits
+- Access unintended memory
+</Warning>
+
+### Safe Deserialization
+
+```python
+import hmac
+import hashlib
+
+SECRET_KEY = b'your-secret-key'
+
+def secure_dump(progress) -> bytes:
+    data = progress.dump()
+    signature = hmac.new(SECRET_KEY, data, hashlib.sha256).digest()
+    return signature + data
+
+def secure_load(signed_data: bytes):
+    signature = signed_data[:32]
+    data = signed_data[32:]
+    
+    expected = hmac.new(SECRET_KEY, data, hashlib.sha256).digest()
+    if not hmac.compare_digest(signature, expected):
+        raise ValueError('Invalid signature - data may be tampered')
+    
+    return pydantic_monty.FunctionSnapshot.load(data)
+```
+
+## Serialization Format
+
+Monty uses [postcard](https://docs.rs/postcard/) - a compact, deterministic binary format:
+
+- **No schema evolution**: Deserializing with a different Monty version may fail
+- **Compact**: Typically 10-50% smaller than JSON
+- **Fast**: Zero-copy deserialization where possible
+- **Deterministic**: Same data always produces same bytes
+
+<Tip>
+For version-stable persistence, consider wrapping serialized data in a versioned container format.
+</Tip>
+
+## Performance
+
+### Serialization Speed
+
+- **Monty instance**: ~0.1ms for typical code
+- **Execution snapshot**: ~0.5-5ms depending on heap size
+
+### Size Examples
+
+| Content | Approximate Size |
+|---------|------------------|
+| Empty Monty instance | ~100 bytes |
+| Small code (10 lines) | ~500 bytes |
+| Large code (1000 lines) | ~50KB |
+| Snapshot with small heap | ~1KB |
+| Snapshot with 1000 objects | ~50KB |
+
+## Best Practices
+
+<Steps>
+  <Step title="Cache Parsed Code">
+    Always serialize and cache `Monty` instances when executing the same code multiple times.
+  </Step>
+  
+  <Step title="Validate Signatures">
+    Sign serialized data with HMAC before saving to untrusted storage.
+  </Step>
+  
+  <Step title="Version Your Data">
+    Wrap serialized bytes in a versioned container to handle Monty version upgrades.
+  </Step>
+  
+  <Step title="Set Expiration">
+    Set TTL on cached snapshots to prevent unbounded storage growth.
+  </Step>
+  
+  <Step title="Compress for Network">
+    Use gzip/zstd compression when sending snapshots over the network.
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Execution Modes" icon="play" href="/concepts/execution-modes">
+    Learn about run() vs start()/resume() execution
+  </Card>
+  
+  <Card title="Resource Limits" icon="gauge" href="/concepts/resource-limits">
+    Configure memory, time, and recursion limits
+  </Card>
+</CardGroup>

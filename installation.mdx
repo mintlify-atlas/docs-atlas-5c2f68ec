@@ -1,0 +1,178 @@
+---
+title: Installation
+description: Install Monty for Python, JavaScript, or Rust
+---
+
+Monty can be used from Python, JavaScript/TypeScript, or Rust. Choose the installation method for your preferred language.
+
+## Python
+
+<Steps>
+  <Step title="Install with uv (recommended)">
+    ```bash
+    uv add pydantic-monty
+    ```
+  </Step>
+  
+  <Step title="Or install with pip">
+    ```bash
+    pip install pydantic-monty
+    ```
+  </Step>
+</Steps>
+
+### Verify Installation
+
+Verify your Python installation by running a simple script:
+
+```python
+import pydantic_monty
+
+# Create a simple interpreter
+m = pydantic_monty.Monty('1 + 2')
+result = m.run()
+print(result)
+# Output: 3
+```
+
+## JavaScript / TypeScript
+
+<Steps>
+  <Step title="Install with npm">
+    ```bash
+    npm install @pydantic/monty
+    ```
+  </Step>
+  
+  <Step title="Or install with yarn">
+    ```bash
+    yarn add @pydantic/monty
+    ```
+  </Step>
+  
+  <Step title="Or install with pnpm">
+    ```bash
+    pnpm add @pydantic/monty
+    ```
+  </Step>
+</Steps>
+
+### Verify Installation
+
+Verify your JavaScript installation:
+
+<CodeGroup>
+```typescript TypeScript
+import { Monty } from '@pydantic/monty'
+
+const m = new Monty('1 + 2')
+const result = m.run()
+console.log(result)
+// Output: 3
+```
+
+```javascript JavaScript
+const { Monty } = require('@pydantic/monty')
+
+const m = new Monty('1 + 2')
+const result = m.run()
+console.log(result)
+// Output: 3
+```
+</CodeGroup>
+
+## Rust
+
+<Steps>
+  <Step title="Add Monty to your Cargo.toml">
+    ```toml
+    [dependencies]
+    monty = "*"
+    ```
+  </Step>
+  
+  <Step title="Run cargo build">
+    ```bash
+    cargo build
+    ```
+  </Step>
+</Steps>
+
+### Verify Installation
+
+Verify your Rust installation:
+
+```rust
+use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+fn main() {
+    let code = "1 + 2";
+    let runner = MontyRun::new(
+        code.to_owned(),
+        "main.py",
+        vec![]
+    ).unwrap();
+    
+    let result = runner.run(
+        vec![],
+        NoLimitTracker,
+        &mut PrintWriter::Stdout
+    ).unwrap();
+    
+    println!("Result: {:?}", result);
+    // Output: Result: Int(3)
+}
+```
+
+## System Requirements
+
+<Note>
+Monty runs on all major platforms and architectures.
+</Note>
+
+### Supported Platforms
+
+- **Linux**: x86_64, aarch64
+- **macOS**: x86_64 (Intel), aarch64 (Apple Silicon)
+- **Windows**: x86_64
+- **WASM**: wasm32-wasip1-threads (JavaScript only)
+
+### Minimum Requirements
+
+<CardGroup cols={3}>
+  <Card title="Python" icon="python">
+    Python 3.10 or higher
+  </Card>
+  
+  <Card title="Node.js" icon="node-js">
+    Node.js 10.0.0 or higher
+  </Card>
+  
+  <Card title="Rust" icon="rust">
+    Rust 1.70 or higher
+  </Card>
+</CardGroup>
+
+## Package Sizes
+
+<Info>
+Monty is designed to be lightweight and fast to install.
+</Info>
+
+| Package | Size |
+|---------|------|
+| Python (`pydantic-monty`) | ~4.5 MB |
+| JavaScript (`@pydantic/monty`) | ~12 MB |
+| Rust (source) | Varies by features |
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart Guide" icon="rocket" href="/quickstart">
+    Learn the basics with a hands-on quickstart
+  </Card>
+  
+  <Card title="Core Concepts" icon="book" href="/concepts/security">
+    Dive deeper into Monty's features
+  </Card>
+</CardGroup>

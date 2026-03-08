@@ -1,0 +1,335 @@
+---
+title: Iterative Execution
+description: Use start() and resume() to handle external function calls step-by-step for fine-grained control
+---
+
+Iterative execution allows you to pause Monty execution at each external function call, giving you complete control over when and how those functions are executed.
+
+## Why Iterative Execution?
+
+Instead of providing all external functions upfront with `run()`, iterative execution lets you:
+
+- **Inspect function calls** before executing them (useful for logging, security, or rate limiting)
+- **Handle async operations** manually
+- **Serialize and resume** execution across process boundaries
+- **Implement custom execution strategies** (e.g., batching, caching)
+
+## Basic Flow
+
+Use `start()` to begin execution and `resume()` to continue after each external function call:
+
+<Steps>
+  <Step title="Start execution">
+    ```python
+    import pydantic_monty
+    
+    code = """
+    data = fetch(url)
+    len(data)
+    """
+    
+    m = pydantic_monty.Monty(code, inputs=['url'])
+    
+    # Start execution - pauses when fetch() is called
+    result = m.start(inputs={'url': 'https://example.com'})
+    ```
+  </Step>
+
+  <Step title="Inspect the function call">
+    ```python
+    print(type(result))  # <class 'pydantic_monty.FunctionSnapshot'>
+    print(result.function_name)  # 'fetch'
+    print(result.args)  # ('https://example.com',)
+    print(result.kwargs)  # {}
+    ```
+  </Step>
+
+  <Step title="Resume with return value">
+    ```python
+    # Perform the actual fetch, then resume with the result
+    result = result.resume(return_value='hello world')
+    
+    print(type(result))  # <class 'pydantic_monty.MontyComplete'>
+    print(result.output)  # 11
+    ```
+  </Step>
+</Steps>
+
+## Snapshot Types
+
+Iterative execution returns different types depending on the execution state:
+
+### FunctionSnapshot
+
+Returned when execution pauses at an external function call:
+
+```python
+m = pydantic_monty.Monty('func(1, x="hello")')
+progress = m.start()
+
+if isinstance(progress, pydantic_monty.FunctionSnapshot):
+    print(progress.script_name)    # 'main.py'
+    print(progress.function_name)  # 'func'
+    print(progress.args)           # (1,)
+    print(progress.kwargs)         # {'x': 'hello'}
+```
+
+### MontyComplete
+
+Returned when execution finishes:
+
+```python
+m = pydantic_monty.Monty('42')
+result = m.start()
+
+if isinstance(result, pydantic_monty.MontyComplete):
+    print(result.output)  # 42
+```
+
+### FutureSnapshot
+
+Returned when async code is waiting for futures to complete (Python only):
+
+```python
+code = "await foobar(1, 2)"
+m = pydantic_monty.Monty(code)
+
+progress = m.start()
+assert isinstance(progress, pydantic_monty.FunctionSnapshot)
+
+progress = progress.resume(future=...)
+assert isinstance(progress, pydantic_monty.FutureSnapshot)
+
+result = progress.resume({progress.pending_call_ids[0]: {'return_value': 3}})
+assert result.output == 3
+```
+
+## Handling Multiple External Calls
+
+When code makes multiple external function calls, resume each one in sequence:
+
+```python
+m = pydantic_monty.Monty('a() + b()')
+
+# First call to a()
+progress = m.start()
+assert progress.function_name == 'a'
+
+# Resume with return value for a()
+progress = progress.resume(return_value=10)
+assert progress.function_name == 'b'
+
+# Resume with return value for b()
+result = progress.resume(return_value=5)
+assert result.output == 15
+```
+
+## Loop Pattern for Multiple Calls
+
+<CodeGroup>
+```python Python
+m = pydantic_monty.Monty('c() + c() + c()')
+
+call_count = 0
+progress = m.start()
+
+while isinstance(progress, pydantic_monty.FunctionSnapshot):
+    print(f"Calling: {progress.function_name}")
+    call_count += 1
+    progress = progress.resume(return_value=call_count)
+
+print(progress.output)  # 6 (1 + 2 + 3)
+```
+
+```typescript JavaScript
+import { Monty, MontySnapshot } from '@pydantic/monty'
+
+const m = new Monty('a() + b()')
+
+let progress = m.start()
+while (progress instanceof MontySnapshot) {
+  console.log(`Calling: ${progress.functionName}`)
+  console.log(`Args: ${progress.args}`)
+  progress = progress.resume({ returnValue: 10 })
+}
+
+console.log(progress.output)  // 20
+```
+</CodeGroup>
+
+## Resuming with Exceptions
+
+You can resume with an exception instead of a return value:
+
+```python
+code = """
+try:
+    result = external_func()
+except ValueError:
+    caught = True
+caught
+"""
+
+m = pydantic_monty.Monty(code)
+progress = m.start()
+
+# Resume with an exception
+result = progress.resume(exception=ValueError('test error'))
+print(result.output)  # True
+```
+
+<Note>
+  If you resume with an exception that isn't caught by the Monty code, it will propagate to your host code wrapped in a `MontyRuntimeError`.
+</Note>
+
+## Serialization
+
+Both `Monty` and snapshot types can be serialized to bytes:
+
+<Tabs>
+  <Tab title="Serialize Parsed Code">
+    ```python
+    # Serialize parsed code to avoid re-parsing
+    m = pydantic_monty.Monty('x + 1', inputs=['x'])
+    data = m.dump()
+    
+    # Later, restore and run
+    m2 = pydantic_monty.Monty.load(data)
+    print(m2.run(inputs={'x': 41}))  # 42
+    ```
+  </Tab>
+
+  <Tab title="Serialize Execution State">
+    ```python
+    # Serialize execution state mid-flight
+    m = pydantic_monty.Monty('fetch(url)', inputs=['url'])
+    progress = m.start(inputs={'url': 'https://example.com'})
+    state = progress.dump()
+    
+    # Later, restore and resume (e.g., in a different process)
+    progress2 = pydantic_monty.FunctionSnapshot.load(state)
+    result = progress2.resume(return_value='response data')
+    print(result.output)  # 'response data'
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+  Serialization enables powerful patterns like saving execution state to a database and resuming later, or distributing work across multiple processes.
+</Info>
+
+## Resume Constraints
+
+<Warning>
+  A `FunctionSnapshot` can only be resumed once. Attempting to call `resume()` twice will raise a `RuntimeError`.
+</Warning>
+
+```python
+m = pydantic_monty.Monty('func()')
+progress = m.start()
+
+# First resume succeeds
+progress.resume(return_value=1)
+
+# Second resume raises RuntimeError
+try:
+    progress.resume(return_value=2)
+except RuntimeError as e:
+    print(e)  # 'Progress already resumed'
+```
+
+## Name Lookups
+
+In addition to `FunctionSnapshot`, you may receive a `NameLookupSnapshot` when code references an undefined variable:
+
+```python
+m = pydantic_monty.Monty('x = foo; x')
+p = m.start()
+
+if isinstance(p, pydantic_monty.NameLookupSnapshot):
+    # Resume by providing the value for 'foo'
+    p2 = p.resume(value=42)
+    print(p2.output)  # 42
+```
+
+<Note>
+  This feature is useful for implementing dynamic variable resolution or lazy imports.
+</Note>
+
+## JavaScript Example
+
+```typescript
+import { Monty, MontySnapshot, MontyComplete } from '@pydantic/monty'
+
+const m = new Monty('fetch_data(url)', { inputs: ['url'] })
+
+let progress = m.start({ inputs: { url: 'https://api.example.com' } })
+
+if (progress instanceof MontySnapshot) {
+  console.log(`Calling: ${progress.functionName}(${progress.args})`)
+  
+  // Perform actual fetch
+  const data = await fetch(progress.args[0])
+  const text = await data.text()
+  
+  // Resume execution
+  progress = progress.resume({ returnValue: text })
+}
+
+if (progress instanceof MontyComplete) {
+  console.log(`Result: ${progress.output}`)
+}
+```
+
+## Best Practices
+
+1. **Always check types**: Use `isinstance()` (Python) or `instanceof` (JavaScript) to determine the snapshot type
+2. **Handle all paths**: Your code should handle both `FunctionSnapshot` and `MontyComplete` returns
+3. **Log function calls**: Iterative execution is perfect for audit logs and debugging
+4. **Serialize strategically**: Only serialize when needed (e.g., for long-running operations or persistence)
+5. **Don't reuse snapshots**: Each snapshot can only be resumed once
+
+## Common Patterns
+
+### Function Call Logger
+
+```python
+def execute_with_logging(monty: pydantic_monty.Monty, **kwargs):
+    progress = monty.start(**kwargs)
+    
+    while isinstance(progress, pydantic_monty.FunctionSnapshot):
+        print(f"[LOG] Calling {progress.function_name}{progress.args}")
+        
+        # Execute the function somehow
+        result = execute_function(progress.function_name, progress.args, progress.kwargs)
+        progress = progress.resume(return_value=result)
+    
+    return progress.output
+```
+
+### Rate Limiting
+
+```python
+import time
+
+def execute_with_rate_limit(monty: pydantic_monty.Monty, delay: float = 1.0):
+    progress = monty.start()
+    
+    while isinstance(progress, pydantic_monty.FunctionSnapshot):
+        time.sleep(delay)  # Rate limit
+        result = call_external_function(progress.function_name, progress.args)
+        progress = progress.resume(return_value=result)
+    
+    return progress.output
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Async Execution" icon="clock" href="/guides/async-execution">
+    Learn about async external functions and run_monty_async()
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Handle exceptions and errors in Monty code
+  </Card>
+</CardGroup>

@@ -1,0 +1,247 @@
+---
+title: Security Model
+description: Understand Monty's sandbox isolation, security guarantees, and threat model
+---
+
+## Sandbox Isolation
+
+Monty is designed to **safely execute untrusted code** by providing complete isolation from the host environment. The interpreter implements a strict sandbox that prevents code from accessing or modifying the host system.
+
+### What's Blocked
+
+Monty blocks all direct access to:
+
+- **Filesystem**: No direct file I/O operations
+- **Environment Variables**: Cannot read or modify environment variables
+- **Network Access**: No sockets or HTTP requests
+- **Subprocess Execution**: Cannot spawn processes or run shell commands
+- **Import System**: Cannot import modules with side effects or use `__import__`
+- **Third-party Libraries**: No external Python packages
+- **Most Standard Library**: Only a minimal subset is available
+
+### What's Allowed
+
+Monty provides controlled access through:
+
+- **External Functions**: Only functions explicitly provided by the host
+- **OS Operations**: Filesystem and network operations handled via host callbacks
+- **Limited Standard Library**: `sys`, `os`, `typing`, `asyncio`, `re` modules
+- **Safe Operations**: Pure computation, data structures, control flow
+
+<CodeGroup>
+```python Python
+import pydantic_monty
+
+# This code is safely sandboxed
+code = """
+result = x * 2
+if result > 10:
+    result = fetch_data()  # Only runs if you provide fetch_data
+result
+"""
+
+m = pydantic_monty.Monty(code, inputs=['x'])
+
+# You control what external functions are available
+result = m.run(
+    inputs={'x': 7},
+    external_functions={'fetch_data': lambda: 'safe data'}
+)
+print(result)  # 'safe data'
+```
+
+```typescript TypeScript
+import { Monty } from '@pydantic/monty';
+
+const code = `
+result = x * 2
+if result > 10:
+    result = fetch_data()
+result
+`;
+
+const m = new Monty(code, {
+  inputs: ['x'],
+  externalFunctions: ['fetch_data']
+});
+
+let progress = m.start({ inputs: { x: 7 } });
+if (progress instanceof MontySnapshot) {
+  // You control when and how external functions execute
+  progress = progress.resume({ returnValue: 'safe data' });
+}
+```
+
+```rust Rust
+use monty::{MontyRun, MontyObject, NoLimitTracker, PrintWriter};
+
+let code = r#"
+result = x * 2
+result
+"#;
+
+let runner = MontyRun::new(
+    code.to_owned(),
+    "script.py",
+    vec!["x".to_owned()]
+).unwrap();
+
+let result = runner.run(
+    vec![MontyObject::Int(7)],
+    NoLimitTracker,
+    &mut PrintWriter::Stdout
+).unwrap();
+
+assert_eq!(result, MontyObject::Int(14));
+```
+</CodeGroup>
+
+## Security Guarantees
+
+### Complete Host Isolation
+
+Monty **never** uses CPython's `exec()` or any FFI to Python. It's a completely independent interpreter written in Rust that provides:
+
+- No filesystem access without explicit host callbacks
+- No environment variable access
+- No network access without explicit host callbacks
+- No subprocess execution
+- No access to system resources
+
+### Memory Safety
+
+Monty is written in Rust without `unsafe` code (except in carefully reviewed FFI boundaries for Python/JavaScript bindings). This provides:
+
+- No buffer overflows
+- No use-after-free errors
+- No null pointer dereferences
+- Safe memory management with reference counting
+
+### Resource Limits
+
+Monty enforces configurable limits to prevent denial-of-service attacks:
+
+- **Memory limits**: Cap maximum heap usage
+- **Execution time**: Timeout after specified duration
+- **Allocation count**: Limit number of heap allocations
+- **Recursion depth**: Prevent stack overflow (default: 1000)
+
+<Note>
+See the [Resource Limits](/concepts/resource-limits) page for detailed configuration options.
+</Note>
+
+## Controlled External Access
+
+### External Functions
+
+All host interaction happens through **external functions** that you explicitly provide:
+
+```python
+import pydantic_monty
+
+code = "fetch(url)"
+m = pydantic_monty.Monty(code, inputs=['url'])
+
+# You control EXACTLY what the code can access
+def safe_fetch(url: str) -> str:
+    # Validate URL, check whitelist, add authentication, etc.
+    if not url.startswith('https://api.example.com/'):
+        raise ValueError('URL not allowed')
+    # Your actual fetch logic here
+    return "safe data"
+
+result = m.run(
+    inputs={'url': 'https://api.example.com/data'},
+    external_functions={'fetch': safe_fetch}
+)
+```
+
+### OS Operations
+
+Filesystem and network operations are **never** performed directly. Instead, they trigger callbacks that you handle:
+
+```python
+# When code calls os.path.exists(path), Monty pauses
+# and returns control to you via start()/resume()
+
+progress = m.start(inputs={'path': '/some/path'})
+
+if isinstance(progress, pydantic_monty.OsSnapshot):
+    # You decide how to handle the OS operation
+    if progress.function == 'path_exists':
+        path = progress.args[0]
+        # Apply your security checks
+        result = your_safe_path_check(path)
+        progress = progress.resume(return_value=result)
+```
+
+## Deserialization Safety
+
+<Warning>
+Only deserialize (`load()`) snapshot data from **trusted sources**. Loading untrusted snapshot data could:
+- Restore malicious execution state
+- Bypass resource limits
+- Execute arbitrary code when resumed
+</Warning>
+
+Always validate the source of serialized data before calling:
+- `Monty.load(bytes)`
+- `FunctionSnapshot.load(bytes)`
+- `RunProgress.load(bytes)`
+
+## Threat Model
+
+Monty is designed to protect against:
+
+### Protected Against
+
+- **Code Injection**: Untrusted Python code execution
+- **Resource Exhaustion**: Memory bombs, infinite loops
+- **Information Disclosure**: No access to host environment
+- **Path Traversal**: No filesystem access without your control
+- **Regex DoS**: Controlled through execution limits
+- **Import Abuse**: Only safe minimal standard library available
+
+### Out of Scope
+
+- **Timing Attacks**: Execution timing is observable
+- **Deserialization Attacks**: Don't load snapshots from untrusted sources
+- **Host Function Vulnerabilities**: Security of external functions is your responsibility
+
+## Why Monty?
+
+Traditional sandboxing approaches have significant limitations:
+
+| Solution | Start Latency | Security | Complexity |
+|----------|--------------|----------|------------|
+| **Monty** | **0.06ms** | **Strict** | **Easy** |
+| Docker | 195ms | Good | Intermediate |
+| Pyodide/WASM | 2800ms | Poor | Intermediate |
+| Subprocess | 30ms | None | Easy |
+| Direct exec() | 0.1ms | **None** | Easy |
+
+Monty provides **strict security** with **microsecond startup time** and no external dependencies.
+
+## Best Practices
+
+<Steps>
+  <Step title="Validate All Inputs">
+    Validate and sanitize all input values before passing them to Monty.
+  </Step>
+  
+  <Step title="Whitelist External Functions">
+    Only provide the minimum set of external functions needed. Apply strict validation within each function.
+  </Step>
+  
+  <Step title="Set Resource Limits">
+    Always configure appropriate resource limits for your use case to prevent DoS.
+  </Step>
+  
+  <Step title="Handle OS Callbacks Safely">
+    When using `start()`/`resume()`, apply security checks in your OS operation handlers.
+  </Step>
+  
+  <Step title="Trust Snapshot Sources">
+    Only deserialize snapshots from trusted sources that you control.
+  </Step>
+</Steps>

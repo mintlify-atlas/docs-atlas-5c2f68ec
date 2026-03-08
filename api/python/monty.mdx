@@ -1,0 +1,372 @@
+---
+title: Monty
+description: Core Monty class for parsing and executing sandboxed Python code
+---
+
+The `Monty` class is the main interface for creating and running a sandboxed Python interpreter. It parses Python code on initialization and can execute it multiple times with different inputs, separating parsing cost from execution.
+
+## Constructor
+
+```python
+Monty(
+    code: str,
+    *,
+    script_name: str = 'main.py',
+    inputs: list[str] | None = None,
+    type_check: bool = False,
+    type_check_stubs: str | None = None,
+    dataclass_registry: list[type] | None = None,
+) -> Monty
+```
+
+Create a new Monty interpreter by parsing the given code.
+
+<ParamField path="code" type="str" required>
+  Python code to execute
+</ParamField>
+
+<ParamField path="script_name" type="str" default="'main.py'">
+  Name used in tracebacks and error messages
+</ParamField>
+
+<ParamField path="inputs" type="list[str] | None">
+  List of input variable names available in the code
+</ParamField>
+
+<ParamField path="type_check" type="bool" default="False">
+  Whether to perform type checking on the code
+</ParamField>
+
+<ParamField path="type_check_stubs" type="str | None">
+  Optional code to prepend before type checking, e.g. with input variable declarations or external function signatures
+</ParamField>
+
+<ParamField path="dataclass_registry" type="list[type] | None">
+  Optional list of dataclass types to register for proper `isinstance()` support on output
+</ParamField>
+
+**Raises:**
+- `MontySyntaxError`: If the code cannot be parsed
+- `MontyTypingError`: If `type_check` is True and type errors are found
+
+### Example
+
+```python
+import pydantic_monty
+
+# Simple code with no inputs
+m = pydantic_monty.Monty('1 + 2')
+print(m.run())
+# Output: 3
+
+# Code with input variables
+m = pydantic_monty.Monty('x * y', inputs=['x', 'y'])
+print(m.run(inputs={'x': 2, 'y': 3}))
+# Output: 6
+```
+
+## Methods
+
+### run()
+
+```python
+def run(
+    self,
+    *,
+    inputs: dict[str, Any] | None = None,
+    limits: ResourceLimits | None = None,
+    external_functions: dict[str, Callable[..., Any]] | None = None,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+    os: Callable[[OsFunction, tuple[Any, ...]], Any] | None = None,
+) -> Any
+```
+
+Execute the code and return the result. The GIL is released allowing parallel execution.
+
+<ParamField path="inputs" type="dict[str, Any] | None">
+  Dict of input variable values (must match names from constructor)
+</ParamField>
+
+<ParamField path="limits" type="ResourceLimits | None">
+  Optional resource limits configuration
+</ParamField>
+
+<ParamField path="external_functions" type="dict[str, Callable[..., Any]] | None">
+  Dict of external function callbacks
+</ParamField>
+
+<ParamField path="print_callback" type="Callable[[Literal['stdout'], str], None] | None">
+  Optional callback for print output
+</ParamField>
+
+<ParamField path="os" type="Callable[[OsFunction, tuple[Any, ...]], Any] | None">
+  Optional callback for OS calls. Called with `(function_name, args)` where function_name is like `'Path.exists'` and args is a tuple of arguments. Must return the appropriate value for the OS function (e.g., bool for `exists()`, `stat_result` for `stat()`).
+</ParamField>
+
+<ResponseField type="Any">
+  The result of the last expression in the code
+</ResponseField>
+
+**Raises:**
+- `MontyRuntimeError`: If the code raises an exception during execution
+
+#### Example with External Functions
+
+```python
+import pydantic_monty
+
+# Code that calls an external function
+m = pydantic_monty.Monty('double(x)', inputs=['x'])
+
+# Provide the external function implementation
+result = m.run(
+    inputs={'x': 5},
+    external_functions={'double': lambda x: x * 2}
+)
+print(result)
+# Output: 10
+```
+
+#### Example with Resource Limits
+
+```python
+import pydantic_monty
+
+m = pydantic_monty.Monty('x + y', inputs=['x', 'y'])
+
+limits = pydantic_monty.ResourceLimits(max_duration_secs=1.0)
+result = m.run(inputs={'x': 1, 'y': 2}, limits=limits)
+print(result)
+# Output: 3
+```
+
+### start()
+
+```python
+def start(
+    self,
+    *,
+    inputs: dict[str, Any] | None = None,
+    limits: ResourceLimits | None = None,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+) -> FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete
+```
+
+Start the code execution and return a progress object, or completion. This allows you to iteratively run code and pause/resume whenever an external function is called. The GIL is released allowing parallel execution.
+
+<ParamField path="inputs" type="dict[str, Any] | None">
+  Dict of input variable values (must match names from constructor)
+</ParamField>
+
+<ParamField path="limits" type="ResourceLimits | None">
+  Optional resource limits configuration
+</ParamField>
+
+<ParamField path="print_callback" type="Callable[[Literal['stdout'], str], None] | None">
+  Optional callback for print output
+</ParamField>
+
+<ResponseField type="FunctionSnapshot | NameLookupSnapshot | FutureSnapshot | MontyComplete">
+  - `FunctionSnapshot` if an external function call is pending
+  - `NameLookupSnapshot` if more futures need to be resolved
+  - `FutureSnapshot` if futures need to be resolved
+  - `MontyComplete` if execution finished without external calls
+</ResponseField>
+
+**Raises:**
+- `MontyRuntimeError`: If the code raises an exception during execution
+
+#### Example with Iterative Execution
+
+```python
+import pydantic_monty
+
+code = """
+data = fetch(url)
+len(data)
+"""
+
+m = pydantic_monty.Monty(code, inputs=['url'])
+
+# Start execution - pauses when fetch() is called
+result = m.start(inputs={'url': 'https://example.com'})
+
+print(type(result))
+# Output: <class 'pydantic_monty.FunctionSnapshot'>
+
+print(result.function_name)
+# Output: fetch
+
+print(result.args)
+# Output: ('https://example.com',)
+
+# Perform the actual fetch, then resume with the result
+result = result.resume(return_value='hello world')
+
+print(type(result))
+# Output: <class 'pydantic_monty.MontyComplete'>
+
+print(result.output)
+# Output: 11
+```
+
+### type_check()
+
+```python
+def type_check(self, prefix_code: str | None = None) -> None
+```
+
+Perform static type checking on the code. Analyzes the code for type errors without executing it. This uses a subset of Python's type system supported by Monty.
+
+<ParamField path="prefix_code" type="str | None">
+  Optional code to prepend before type checking, e.g. with input variable declarations or external function signatures
+</ParamField>
+
+**Raises:**
+- `MontyTypingError`: If type errors are found. Use `.display(format, color)` on the exception to render the diagnostics in different formats.
+- `RuntimeError`: If the type checking infrastructure fails internally.
+
+### dump()
+
+```python
+def dump(self) -> bytes
+```
+
+Serialize the Monty instance to a binary format. The serialized data can be stored and later restored with `Monty.load()`. This allows caching parsed code to avoid re-parsing on subsequent runs.
+
+<ResponseField type="bytes">
+  Bytes containing the serialized Monty instance
+</ResponseField>
+
+**Raises:**
+- `ValueError`: If serialization fails
+
+#### Example
+
+```python
+import pydantic_monty
+
+# Serialize parsed code to avoid re-parsing
+m = pydantic_monty.Monty('x + 1', inputs=['x'])
+data = m.dump()
+
+# Later, restore and run
+m2 = pydantic_monty.Monty.load(data)
+print(m2.run(inputs={'x': 41}))
+# Output: 42
+```
+
+### load() (static method)
+
+```python
+@staticmethod
+def load(
+    data: bytes,
+    *,
+    dataclass_registry: list[type] | None = None,
+) -> Monty
+```
+
+Deserialize a Monty instance from binary format.
+
+<ParamField path="data" type="bytes" required>
+  The serialized Monty data from `dump()`
+</ParamField>
+
+<ParamField path="dataclass_registry" type="list[type] | None">
+  Optional list of dataclass types to register for proper `isinstance()` support on output
+</ParamField>
+
+<ResponseField type="Monty">
+  A new Monty instance
+</ResponseField>
+
+**Raises:**
+- `ValueError`: If deserialization fails
+
+### register_dataclass()
+
+```python
+def register_dataclass(self, cls: type) -> None
+```
+
+Register a dataclass type for proper `isinstance()` support on output.
+
+When a dataclass passes through Monty and is returned, it normally becomes an `UnknownDataclass`. By registering the original type, we can use it to instantiate a real instance of that dataclass.
+
+<ParamField path="cls" type="type" required>
+  The dataclass type to register
+</ParamField>
+
+**Raises:**
+- `TypeError`: If the argument is not a dataclass type
+
+## Async Helper Function
+
+### run_monty_async()
+
+```python
+async def run_monty_async(
+    monty_runner: Monty,
+    *,
+    inputs: dict[str, Any] | None = None,
+    external_functions: dict[str, Callable[..., Any]] | None = None,
+    limits: ResourceLimits | None = None,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+    os: AbstractOS | None = None,
+) -> Any
+```
+
+Run a Monty script with async external functions and optional OS access. This function provides a convenient way to run Monty code that uses both async external functions and filesystem operations.
+
+<ParamField path="monty_runner" type="Monty" required>
+  The Monty instance to execute
+</ParamField>
+
+<ParamField path="inputs" type="dict[str, Any] | None">
+  Dictionary of input variable values
+</ParamField>
+
+<ParamField path="external_functions" type="dict[str, Callable[..., Any]] | None">
+  Dictionary of external functions (can be sync or async)
+</ParamField>
+
+<ParamField path="limits" type="ResourceLimits | None">
+  Optional resource limits configuration
+</ParamField>
+
+<ParamField path="print_callback" type="Callable[[Literal['stdout'], str], None] | None">
+  Optional callback for print output
+</ParamField>
+
+<ParamField path="os" type="AbstractOS | None">
+  Optional OS access handler for filesystem operations (e.g., OSAccess instance)
+</ParamField>
+
+<ResponseField type="Any">
+  The output of the Monty script
+</ResponseField>
+
+#### Example
+
+```python
+import asyncio
+import pydantic_monty
+
+async def async_fetch(url):
+    # Simulated async operation
+    await asyncio.sleep(0.1)
+    return f"Data from {url}"
+
+async def main():
+    code = "result = fetch('https://example.com')"
+    m = pydantic_monty.Monty(code)
+    
+    output = await pydantic_monty.run_monty_async(
+        m,
+        external_functions={'fetch': async_fetch}
+    )
+    print(output)
+
+asyncio.run(main())
+```

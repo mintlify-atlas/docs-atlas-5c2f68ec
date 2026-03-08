@@ -1,0 +1,222 @@
+---
+title: Python Subset
+description: Python language features supported by Monty
+---
+
+Monty supports a carefully selected subset of Python 3.14 designed for agent code execution. This page documents the supported language features.
+
+## Supported Features
+
+Monty can run a reasonable subset of Python code - enough for your agent to express what it wants to do.
+
+### Core Language Features
+
+<AccordionGroup>
+  <Accordion title="Functions">
+    Monty supports standard Python function definitions including:
+    - Function definitions with `def`
+    - Async functions with `async def`
+    - Positional and keyword arguments
+    - Default parameter values
+    - Return statements
+    - Nested functions
+
+    ```python
+    def fib(n):
+        if n <= 1:
+            return n
+        return fib(n - 1) + fib(n - 2)
+
+    async def fetch_data(url: str):
+        data = await get_content(url)
+        return data
+    ```
+  </Accordion>
+
+  <Accordion title="Control Flow">
+    Full support for Python control flow statements:
+    - `if`, `elif`, `else` conditionals
+    - `while` loops
+    - `for` loops with iterators
+    - `break` and `continue` statements
+    - `return` statements
+
+    ```python
+    # Conditional logic
+    if x > 10:
+        print('large')
+    elif x > 5:
+        print('medium')
+    else:
+        print('small')
+
+    # Loops
+    for item in items:
+        if should_skip(item):
+            continue
+        process(item)
+    ```
+  </Accordion>
+
+  <Accordion title="Data Types">
+    Monty supports common Python built-in types:
+    - **Primitives**: `int`, `float`, `bool`, `None`
+    - **Strings**: `str` with full Unicode support
+    - **Collections**: `list`, `tuple`, `dict`, `set`
+    - **Functions**: Function objects and lambdas
+
+    ```python
+    # All these types work in Monty
+    count = 42
+    ratio = 3.14
+    enabled = True
+    name = 'Alice'
+    items = [1, 2, 3]
+    config = {'host': 'localhost', 'port': 8080}
+    ```
+  </Accordion>
+
+  <Accordion title="Async/Await">
+    First-class support for asynchronous programming:
+    - `async def` function definitions
+    - `await` expressions
+    - Coroutines and async generators
+    - Integration with host event loop
+
+    ```python
+    async def agent(prompt: str, messages: list):
+        while True:
+            output = await call_llm(prompt, messages)
+            if isinstance(output, str):
+                return output
+            messages.extend(output)
+    ```
+  </Accordion>
+
+  <Accordion title="Type Hints">
+    Full support for modern Python type hints:
+    - Function parameter and return type annotations
+    - Variable type annotations
+    - Generic types from `typing` module
+    - Built-in type checking with [ty](https://docs.astral.sh/ty/)
+
+    ```python
+    from typing import List, Dict, Optional
+
+    def process(items: List[str]) -> Dict[str, int]:
+        return {item: len(item) for item in items}
+
+    result: Optional[str] = None
+    ```
+  </Accordion>
+
+  <Accordion title="Operators">
+    Standard Python operators are supported:
+    - Arithmetic: `+`, `-`, `*`, `/`, `//`, `%`, `**`
+    - Comparison: `==`, `!=`, `<`, `>`, `<=`, `>=`
+    - Logical: `and`, `or`, `not`
+    - Membership: `in`, `not in`
+    - Identity: `is`, `is not`
+
+    ```python
+    result = (x + y) * 2
+    if name in allowed_names and count > 0:
+        process()
+    ```
+  </Accordion>
+
+  <Accordion title="Comprehensions">
+    All Python comprehension types:
+    - List comprehensions
+    - Dict comprehensions
+    - Set comprehensions
+    - Generator expressions
+
+    ```python
+    squares = [x**2 for x in range(10) if x % 2 == 0]
+    lookup = {name: len(name) for name in names}
+    unique = {word.lower() for word in words}
+    total = sum(x for x in numbers if x > 0)
+    ```
+  </Accordion>
+
+  <Accordion title="Exception Handling">
+    Full exception handling support:
+    - `try`/`except`/`finally` blocks
+    - `raise` statements
+    - Built-in exception types
+    - Custom exception messages
+
+    ```python
+    try:
+        result = risky_operation()
+    except ValueError as e:
+        print(f'Invalid value: {e}')
+    except Exception:
+        raise RuntimeError('Operation failed')
+    finally:
+        cleanup()
+    ```
+  </Accordion>
+
+  <Accordion title="String Formatting">
+    Multiple string formatting options:
+    - f-strings with expressions
+    - `.format()` method
+    - `%` formatting
+    - String concatenation
+
+    ```python
+    # f-strings (recommended)
+    message = f'Hello {name}, you have {count} items'
+
+    # .format() method
+    template = 'Status: {status}'
+    result = template.format(status='ready')
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Built-in Functions
+
+Monty provides access to essential Python built-in functions:
+
+- **Type conversions**: `int()`, `str()`, `float()`, `bool()`, `list()`, `dict()`, `set()`, `tuple()`
+- **Iteration**: `len()`, `range()`, `enumerate()`, `zip()`, `iter()`, `next()`
+- **Functional**: `map()`, `filter()`, `sorted()`, `sum()`, `min()`, `max()`, `any()`, `all()`
+- **I/O**: `print()` (output captured by host)
+- **Inspection**: `type()`, `isinstance()`, `hasattr()`, `getattr()`, `setattr()`
+- **Other**: `abs()`, `round()`, `repr()`, `id()`
+
+```python
+# Built-in functions work as expected
+print('Processing items...')
+numbers = list(range(10))
+filtered = [x for x in numbers if x % 2 == 0]
+total = sum(filtered)
+print(f'Sum of evens: {total}')
+```
+
+<Note>
+  Monty's `print()` function captures output and returns it to the host via callbacks, rather than writing directly to stdout.
+</Note>
+
+## Performance Characteristics
+
+Monty provides excellent performance for agent workloads:
+
+- **Startup time**: &lt;1μs from code to execution result
+- **Runtime performance**: Generally between 5x faster and 5x slower than CPython
+- **Memory efficiency**: Manual reference counting and controlled allocation
+- **Resource limits**: Built-in tracking of memory, allocations, and execution time
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Standard Library" icon="books" href="/language/stdlib-modules">
+    Explore supported stdlib modules like `sys`, `os`, `typing`, and `asyncio`
+  </Card>
+  <Card title="Limitations" icon="triangle-exclamation" href="/language/limitations">
+    Understand what Python features are not supported
+  </Card>
+</CardGroup>

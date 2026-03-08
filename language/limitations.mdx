@@ -1,0 +1,472 @@
+---
+title: Limitations
+description: Python features NOT supported by Monty
+---
+
+Monty is intentionally limited to support **one specific use case: running code written by agents**. This page documents what Python features are not available.
+
+<Warning>
+  Monty is **experimental** and not ready for production use. The project is still in active development.
+</Warning>
+
+## Major Language Limitations
+
+These core Python features are currently not supported:
+
+### No Classes (Yet)
+
+Monty does not currently support class definitions.
+
+```python
+# ❌ This will NOT work
+class MyClass:
+    def __init__(self, value):
+        self.value = value
+
+    def get_value(self):
+        return self.value
+```
+
+<Note>
+  Class support is **planned** and should be added soon. Track progress on the [Monty GitHub repository](https://github.com/pydantic/monty).
+</Note>
+
+**What works instead:**
+
+```python
+# ✅ Use dictionaries and functions
+def create_object(value):
+    return {'value': value}
+
+def get_value(obj):
+    return obj['value']
+
+obj = create_object(42)
+print(get_value(obj))
+```
+
+### No Match Statements (Yet)
+
+Pattern matching with `match`/`case` is not implemented.
+
+```python
+# ❌ This will NOT work
+match status:
+    case 'success':
+        return True
+    case 'error':
+        return False
+    case _:
+        return None
+```
+
+<Note>
+  Match statement support is **planned** and should be added soon.
+</Note>
+
+**What works instead:**
+
+```python
+# ✅ Use if/elif/else chains
+if status == 'success':
+    return True
+elif status == 'error':
+    return False
+else:
+    return None
+
+# ✅ Or use dictionaries for dispatch
+handlers = {
+    'success': lambda: True,
+    'error': lambda: False,
+}
+return handlers.get(status, lambda: None)()
+```
+
+---
+
+## Standard Library Limitations
+
+### Limited Module Support
+
+Only these stdlib modules are available:
+
+- `sys`
+- `os`
+- `typing`
+- `asyncio`
+- `re`
+- `pathlib`
+
+Coming soon: `datetime`, `dataclasses`, `json`
+
+```python
+# ❌ These imports will FAIL
+import math
+import random
+import collections
+import itertools
+import functools
+import pickle
+import socket
+import urllib
+```
+
+<Warning>
+  The rest of the Python standard library is **not available** and most modules will not be added. Monty is designed for agent code, not general-purpose Python execution.
+</Warning>
+
+**What works instead:**
+
+```python
+# ✅ Use built-in functions and supported modules
+import sys
+import re
+from typing import List, Dict
+
+# Basic math operations work without imports
+result = abs(-42)
+maximum = max([1, 2, 3])
+total = sum(range(10))
+```
+
+### No Third-Party Libraries
+
+Monty **cannot** use third-party packages like Pydantic, requests, numpy, etc.
+
+```python
+# ❌ This will NEVER work
+import pydantic
+import requests
+import numpy
+import pandas
+```
+
+<Warning>
+  Support for third-party libraries is **not a goal** for Monty. The interpreter is designed exclusively for sandboxed agent code execution.
+</Warning>
+
+**Design philosophy:**
+
+Monty is built for a specific use case where the code is:
+- Written by an LLM/agent
+- Executed in a sandboxed environment
+- Using only built-in and stdlib features
+- Making external calls via host-provided functions
+
+---
+
+## Security Restrictions
+
+These restrictions exist to ensure safe execution of untrusted agent code.
+
+### No Direct Filesystem Access
+
+All filesystem operations are **sandboxed** and controlled by the host.
+
+```python
+# ❌ Direct file I/O is blocked by default
+with open('data.txt', 'r') as f:
+    content = f.read()
+
+# ❌ These also don't work without host permission
+import os
+os.listdir('.')
+os.remove('file.txt')
+```
+
+<Accordion title="How filesystem access works">
+  The host environment must explicitly provide filesystem access through external functions:
+
+  ```python
+  # Agent code calls host-provided function
+  content = read_file('data.txt')  # External function
+  ```
+
+  The host controls:
+  - Which files can be accessed
+  - What operations are allowed
+  - Path validation and sandboxing
+</Accordion>
+
+### No Environment Variables
+
+Direct access to environment variables is blocked.
+
+```python
+# ❌ This will not work
+import os
+api_key = os.environ.get('API_KEY')
+```
+
+**What works instead:**
+
+```python
+# ✅ Host provides config through external functions
+api_key = get_config('api_key')  # External function
+```
+
+### No Network Access
+
+Sockets, HTTP requests, and all network operations are blocked.
+
+```python
+# ❌ These will fail (imports don't exist)
+import socket
+import urllib.request
+import http.client
+```
+
+**What works instead:**
+
+```python
+# ✅ Use host-provided external functions
+response = await http_get('https://api.example.com/data')
+data = await call_llm(prompt, messages)
+```
+
+### No Subprocess Execution
+
+Running external commands or spawning processes is blocked.
+
+```python
+# ❌ These don't work (imports don't exist)
+import subprocess
+import os
+
+os.system('ls')
+subprocess.run(['python', 'script.py'])
+```
+
+---
+
+## Resource Limits
+
+Monty enforces strict resource limits to prevent abuse:
+
+### Memory Limits
+
+```python
+# Agent code that exceeds memory limits will be terminated
+data = [0] * 10_000_000_000  # May trigger ResourceError
+```
+
+### Execution Time Limits
+
+```python
+# Infinite loops are caught by timeout
+while True:
+    pass  # Will be terminated after time limit
+```
+
+### Allocation Limits
+
+```python
+# Excessive allocations trigger limits
+for i in range(1_000_000):
+    data = [0] * 1000  # May trigger ResourceError
+```
+
+<Note>
+  Resource limits are configurable by the host and are designed to prevent runaway agent code from consuming excessive resources.
+</Note>
+
+---
+
+## Import System Limitations
+
+### No Dynamic Imports
+
+The `__import__()` function and `importlib` are not available.
+
+```python
+# ❌ Dynamic imports don't work
+module = __import__('sys')
+
+import importlib
+mod = importlib.import_module('os')
+```
+
+### No Import Hooks
+
+Custom import hooks and meta path finders are not supported.
+
+```python
+# ❌ These don't work
+import sys
+sys.meta_path.append(custom_finder)
+```
+
+---
+
+## Advanced Python Features
+
+These advanced features are not supported:
+
+### No Metaclasses
+
+Since classes aren't supported yet, metaclasses are also unavailable.
+
+### No Decorators on Classes
+
+Class decorators don't work (no classes), but function decorators work fine:
+
+```python
+# ✅ Function decorators work
+def my_decorator(func):
+    def wrapper(*args, **kwargs):
+        print('Before')
+        result = func(*args, **kwargs)
+        print('After')
+        return result
+    return wrapper
+
+@my_decorator
+def my_function():
+    print('Function')
+```
+
+### No Generators (Some Limitations)
+
+Basic generators work, but some advanced features may not be fully supported:
+
+```python
+# ✅ Simple generators work
+def count(n):
+    for i in range(n):
+        yield i
+
+for num in count(5):
+    print(num)
+```
+
+### No Context Managers (Limited)
+
+The `with` statement has limited support. Custom context managers may not work fully.
+
+```python
+# ⚠️ Limited support for context managers
+# Simple cases may work, complex ones may not
+```
+
+---
+
+## What Monty IS Designed For
+
+Despite these limitations, Monty excels at its intended use case:
+
+<AccordionGroup>
+  <Accordion title="Agent Code Execution">
+    Perfect for running LLM-generated Python code:
+
+    ```python
+    async def agent(prompt: str, messages: list):
+        while True:
+            output = await call_llm(prompt, messages)
+            if isinstance(output, str):
+                return output
+            messages.extend(output)
+    ```
+  </Accordion>
+
+  <Accordion title="Tool Orchestration">
+    Excellent for coordinating external function calls:
+
+    ```python
+    # Fetch data concurrently
+    import asyncio
+
+    user, prefs, history = await asyncio.gather(
+        get_user(user_id),
+        get_preferences(user_id),
+        get_history(user_id)
+    )
+
+    return analyze(user, prefs, history)
+    ```
+  </Accordion>
+
+  <Accordion title="Data Processing">
+    Great for processing and transforming data:
+
+    ```python
+    def process_results(items: list) -> dict:
+        filtered = [x for x in items if x['score'] > 0.8]
+        grouped = {}
+        for item in filtered:
+            category = item['category']
+            if category not in grouped:
+                grouped[category] = []
+            grouped[category].append(item)
+        return grouped
+    ```
+  </Accordion>
+
+  <Accordion title="Control Flow Logic">
+    Ideal for agent decision-making logic:
+
+    ```python
+    def decide_action(state: dict) -> str:
+        if state['confidence'] < 0.5:
+            return 'ask_clarification'
+        elif state['data_missing']:
+            return 'fetch_more_data'
+        else:
+            return 'process_response'
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## Comparing to Alternatives
+
+Why use Monty despite these limitations?
+
+| Feature | Monty | Docker | Pyodide | Full Python |
+|---------|-------|--------|---------|-------------|
+| Startup time | &lt;1μs | ~195ms | ~2800ms | ~30ms |
+| Security | Strict sandbox | Good isolation | Poor | None |
+| Stdlib | Limited | Full | Full | Full |
+| Third-party libs | No | Yes | Most | Yes |
+| Classes | Coming soon | Yes | Yes | Yes |
+| Use case | Agent code | General | Browser | General |
+
+**When to use Monty:**
+- Running LLM-generated code
+- Need microsecond startup times
+- Security is critical
+- Stdlib subset is sufficient
+- Building agentic systems
+
+**When NOT to use Monty:**
+- Need full Python compatibility
+- Require third-party libraries
+- Need classes today (coming soon)
+- General-purpose scripting
+
+---
+
+## Roadmap
+
+Planned improvements:
+
+1. **Class support** - Coming soon
+2. **Match statements** - Coming soon
+3. **More stdlib modules** - `datetime`, `dataclasses`, `json`
+4. **Enhanced async features** - Better asyncio integration
+
+<Note>
+  Follow development on [GitHub](https://github.com/pydantic/monty) and join the [Pydantic Slack](https://logfire.pydantic.dev/docs/join-slack/) for updates.
+</Note>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Python Subset" icon="python" href="/language/python-subset">
+    See what Python features ARE supported
+  </Card>
+  <Card title="Standard Library" icon="books" href="/language/stdlib-modules">
+    Explore available stdlib modules
+  </Card>
+</CardGroup>

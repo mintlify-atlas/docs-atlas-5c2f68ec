@@ -1,0 +1,344 @@
+---
+title: "Snapshots"
+description: "Iterative execution control with MontySnapshot and MontyComplete"
+---
+
+## Overview
+
+Monty supports iterative execution, allowing you to pause and resume Python code execution. This is useful for:
+
+- Handling external function calls with custom logic
+- Implementing async external functions
+- Debugging and step-through execution
+- Dynamic name resolution
+
+When you call `Monty.start()` or `resume()` on a snapshot, execution returns one of three types:
+- `MontySnapshot` - Paused at an external function call
+- `MontyNameLookup` - Paused at an undefined name lookup
+- `MontyComplete` - Execution finished successfully
+
+## MontySnapshot
+
+Represents paused execution waiting for an external function call to be resolved.
+
+### Properties
+
+<ResponseField name="scriptName" type="string">
+  The name of the script being executed
+</ResponseField>
+
+<ResponseField name="functionName" type="string">
+  The name of the external function being called
+</ResponseField>
+
+<ResponseField name="args" type="any[]">
+  Positional arguments passed to the external function
+</ResponseField>
+
+<ResponseField name="kwargs" type="Record<string, any>">
+  Keyword arguments passed to the external function as an object
+</ResponseField>
+
+### Methods
+
+#### resume()
+
+```typescript
+resume(options: ResumeOptions): MontySnapshot | MontyNameLookup | MontyComplete
+```
+
+Resumes execution with either a return value or an exception.
+
+<ParamField path="options" type="ResumeOptions" required>
+  Must contain either `returnValue` or `exception`, but not both
+  
+  <Expandable title="ResumeOptions properties">
+    <ParamField path="returnValue" type="any">
+      The value to return from the external function call
+    </ParamField>
+    
+    <ParamField path="exception" type="ExceptionInput">
+      An exception to raise in the Python code
+      
+      <Expandable title="ExceptionInput properties">
+        <ParamField path="type" type="string" required>
+          Exception type name (e.g., `'ValueError'`, `'RuntimeError'`)
+        </ParamField>
+        
+        <ParamField path="message" type="string">
+          Exception message
+        </ParamField>
+      </Expandable>
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="MontySnapshot | MontyNameLookup | MontyComplete">
+  - `MontySnapshot` - Paused at another external function call
+  - `MontyNameLookup` - Paused at a name lookup
+  - `MontyComplete` - Execution completed
+</ResponseField>
+
+**Throws:**
+- `MontyRuntimeError` - If the code raises an exception
+
+#### dump()
+
+```typescript
+dump(): Buffer
+```
+
+Serializes the snapshot to binary format for later restoration.
+
+<ResponseField name="data" type="Buffer">
+  Binary representation of the snapshot
+</ResponseField>
+
+#### load() (static)
+
+```typescript
+static load(data: Buffer, options?: SnapshotLoadOptions): MontySnapshot
+```
+
+Deserializes a snapshot from binary format.
+
+<ParamField path="data" type="Buffer" required>
+  Binary data from `dump()`
+</ParamField>
+
+<ParamField path="options" type="SnapshotLoadOptions">
+  Optional configuration for loading
+</ParamField>
+
+<ResponseField name="snapshot" type="MontySnapshot">
+  Restored snapshot ready to resume
+</ResponseField>
+
+### Example: Basic Iteration
+
+```typescript
+import { Monty, MontySnapshot, MontyComplete } from '@pydantic/monty'
+
+const m = new Monty('a() + b()')
+
+let progress = m.start()
+while (progress instanceof MontySnapshot) {
+  console.log(`Calling: ${progress.functionName}`)
+  console.log(`Args:`, progress.args)
+  console.log(`Kwargs:`, progress.kwargs)
+  
+  // Provide the return value and resume
+  progress = progress.resume({ returnValue: 10 })
+}
+
+// progress is now MontyComplete
+if (progress instanceof MontyComplete) {
+  console.log('Result:', progress.output) // 20
+}
+```
+
+### Example: Error Injection
+
+```typescript
+const m = new Monty('try_operation()')
+
+let progress = m.start()
+if (progress instanceof MontySnapshot) {
+  // Inject an error instead of a return value
+  progress = progress.resume({
+    exception: {
+      type: 'ValueError',
+      message: 'Operation failed',
+    },
+  })
+}
+```
+
+### Example: Serialization
+
+```typescript
+const m = new Monty('external_func()')
+
+const snapshot = m.start()
+if (snapshot instanceof MontySnapshot) {
+  // Save snapshot
+  const data = snapshot.dump()
+  fs.writeFileSync('snapshot.bin', data)
+  
+  // Later, restore and resume
+  const restored = MontySnapshot.load(data)
+  const result = restored.resume({ returnValue: 42 })
+}
+```
+
+## MontyNameLookup
+
+Represents paused execution waiting for a name (variable) to be resolved.
+
+### Properties
+
+<ResponseField name="scriptName" type="string">
+  The name of the script being executed
+</ResponseField>
+
+<ResponseField name="variableName" type="string">
+  The name of the variable being looked up
+</ResponseField>
+
+### Methods
+
+#### resume()
+
+```typescript
+resume(options?: NameLookupResumeOptions): MontySnapshot | MontyNameLookup | MontyComplete
+```
+
+Resumes execution after resolving the name lookup.
+
+<ParamField path="options" type="NameLookupResumeOptions">
+  <Expandable title="NameLookupResumeOptions properties">
+    <ParamField path="value" type="any">
+      The value to bind to the variable name. If omitted or `undefined`, raises `NameError`
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+<ResponseField name="result" type="MontySnapshot | MontyNameLookup | MontyComplete">
+  - `MontySnapshot` - Paused at an external function call
+  - `MontyNameLookup` - Paused at another name lookup
+  - `MontyComplete` - Execution completed
+</ResponseField>
+
+#### dump() / load()
+
+Same as `MontySnapshot` - serialize and deserialize name lookup state.
+
+### Example: Dynamic Name Resolution
+
+```typescript
+import { Monty, MontyNameLookup, MontySnapshot } from '@pydantic/monty'
+
+const externalFunctions = {
+  add: (a: number, b: number) => a + b,
+  multiply: (a: number, b: number) => a * b,
+}
+
+const m = new Monty('add(2, 3) + multiply(4, 5)')
+
+let progress = m.start()
+while (!(progress instanceof MontyComplete)) {
+  if (progress instanceof MontyNameLookup) {
+    // Resolve the name to an external function
+    const name = progress.variableName
+    const func = externalFunctions[name]
+    
+    if (func) {
+      progress = progress.resume({ value: func })
+    } else {
+      // Raise NameError by resuming with no value
+      progress = progress.resume()
+    }
+  } else if (progress instanceof MontySnapshot) {
+    // Handle function call
+    const func = externalFunctions[progress.functionName]
+    const result = func(...progress.args)
+    progress = progress.resume({ returnValue: result })
+  }
+}
+
+console.log(progress.output) // 25
+```
+
+## MontyComplete
+
+Represents successfully completed execution with a final output value.
+
+### Properties
+
+<ResponseField name="output" type="any">
+  The final result value from the executed code (the result of the last expression)
+</ResponseField>
+
+### Example
+
+```typescript
+import { Monty, MontyComplete } from '@pydantic/monty'
+
+const m = new Monty('1 + 2 + 3')
+const result = m.start()
+
+if (result instanceof MontyComplete) {
+  console.log('Result:', result.output) // 6
+}
+```
+
+## Complete Example: Async External Functions
+
+Combining snapshots with async functions:
+
+```typescript
+import { Monty, MontySnapshot, MontyNameLookup, MontyComplete } from '@pydantic/monty'
+
+const externalFunctions = {
+  fetch_data: async (url: string) => {
+    const response = await fetch(url)
+    return response.json()
+  },
+  process: (data: any) => {
+    return data.value * 2
+  },
+}
+
+async function runAsync(m: Monty, inputs?: Record<string, any>) {
+  let progress = m.start({ inputs })
+  
+  while (!(progress instanceof MontyComplete)) {
+    if (progress instanceof MontyNameLookup) {
+      // Resolve name to external function
+      const func = externalFunctions[progress.variableName]
+      progress = progress.resume({ value: func })
+    } else if (progress instanceof MontySnapshot) {
+      // Call external function
+      const func = externalFunctions[progress.functionName]
+      try {
+        let result = func(...progress.args, progress.kwargs)
+        
+        // Await if promise
+        if (result && typeof result.then === 'function') {
+          result = await result
+        }
+        
+        progress = progress.resume({ returnValue: result })
+      } catch (error) {
+        progress = progress.resume({
+          exception: {
+            type: 'RuntimeError',
+            message: error.message,
+          },
+        })
+      }
+    }
+  }
+  
+  return progress.output
+}
+
+const code = `
+data = fetch_data('https://api.example.com/data')
+result = process(data)
+result
+`
+
+const m = new Monty(code)
+const result = await runAsync(m)
+console.log(result)
+```
+
+<Tip>
+For simple async function support, use the built-in `runMontyAsync()` helper instead of manually handling snapshots. See [Monty Class](/api/js/monty#helper-function-runmontyasync).
+</Tip>
+
+## See Also
+
+- [Monty Class](/api/js/monty) - Main interpreter class
+- [Errors](/api/js/errors) - Error handling

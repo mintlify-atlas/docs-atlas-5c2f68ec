@@ -1,0 +1,197 @@
+---
+title: 'Building a Simple Agent'
+description: 'Learn how to build a basic agent with Monty that makes iterative LLM calls'
+---
+
+## Overview
+
+This guide shows you how to build a simple agent using Monty. The agent will make iterative calls to an LLM until it receives a final response.
+
+## The Agent Pattern
+
+A basic agent loop:
+1. Maintains a list of messages
+2. Calls the LLM with the current message history
+3. If the LLM returns more messages, append them and loop
+4. If the LLM returns a string, return it as the final output
+
+## Complete Example
+
+<Steps>
+  <Step title="Write the agent code">
+    Define your agent logic that Monty will execute:
+
+    ```python
+    code = """
+    async def agent(prompt: str, messages: Messages):
+        while True:
+            print(f'messages so far: {messages}')
+            output = await call_llm(prompt, messages)
+            if isinstance(output, str):
+                return output
+            messages.extend(output)
+
+    await agent(prompt, [])
+    """
+    ```
+
+    <Note>
+    The agent uses `call_llm()` which is an external function you'll provide to Monty.
+    </Note>
+  </Step>
+
+  <Step title="Define type stubs">
+    Provide type definitions for Monty's type checker:
+
+    ```python
+    type_definitions = """
+    from typing import Any
+
+    Messages = list[dict[str, Any]]
+
+    async def call_llm(prompt: str, messages: Messages) -> str | Messages:
+        raise NotImplementedError()
+
+    prompt: str = ''
+    """
+    ```
+
+    <Info>
+    Type stubs tell Monty what types to expect. The `NotImplementedError()` indicates this function will be provided externally.
+    </Info>
+  </Step>
+
+  <Step title="Create the Monty interpreter">
+    Initialize Monty with your code and type definitions:
+
+    ```python
+    from typing import Any
+    import pydantic_monty
+
+    Messages = list[dict[str, Any]]
+
+    m = pydantic_monty.Monty(
+        code,
+        inputs=['prompt'],
+        script_name='agent.py',
+        type_check=True,
+        type_check_stubs=type_definitions,
+    )
+    ```
+  </Step>
+
+  <Step title="Implement the external function">
+    Provide your host implementation of `call_llm()`:
+
+    ```python
+    async def call_llm(prompt: str, messages: Messages) -> str | Messages:
+        if len(messages) < 2:
+            # Return more messages to continue the loop
+            return [{'role': 'system', 'content': 'example response'}]
+        else:
+            # Return a string to end the loop
+            return f'example output, message count {len(messages)}'
+    ```
+
+    <Note>
+    This is a mock implementation. In a real agent, you would call an actual LLM API here.
+    </Note>
+  </Step>
+
+  <Step title="Run the agent">
+    Execute the agent with your external function:
+
+    ```python
+    async def main():
+        output = await pydantic_monty.run_monty_async(
+            m,
+            inputs={'prompt': 'testing'},
+            external_functions={'call_llm': call_llm},
+        )
+        print(output)
+        # Output: example output, message count 2
+
+    if __name__ == '__main__':
+        import asyncio
+        asyncio.run(main())
+    ```
+  </Step>
+</Steps>
+
+## How It Works
+
+<CodeGroup>
+```python Agent Code (runs in Monty)
+async def agent(prompt: str, messages: Messages):
+    while True:
+        print(f'messages so far: {messages}')
+        output = await call_llm(prompt, messages)
+        if isinstance(output, str):
+            return output
+        messages.extend(output)
+```
+
+```python Host Code (runs in your application)
+async def call_llm(prompt: str, messages: Messages) -> str | Messages:
+    # Your LLM API call here
+    response = await openai.chat.completions.create(
+        model='gpt-4',
+        messages=[{'role': 'user', 'content': prompt}] + messages
+    )
+    # Return either more messages or final string
+    return response.choices[0].message.content
+```
+</CodeGroup>
+
+The agent code runs inside Monty's sandbox, while `call_llm()` runs in your host application with full network access.
+
+## Key Concepts
+
+### Inputs
+```python
+m = pydantic_monty.Monty(
+    code,
+    inputs=['prompt'],  # Variables to inject into the agent
+)
+```
+
+Inputs are variables passed from your host code into the Monty sandbox.
+
+### External Functions
+```python
+output = await pydantic_monty.run_monty_async(
+    m,
+    external_functions={'call_llm': call_llm},  # Functions the agent can call
+)
+```
+
+External functions are host functions that the agent code can call. They execute outside the sandbox.
+
+### Type Checking
+```python
+m = pydantic_monty.Monty(
+    code,
+    type_check=True,
+    type_check_stubs=type_definitions,
+)
+```
+
+Monty validates types before execution to catch errors early.
+
+## Execution Flow
+
+1. **Monty parses and type-checks** your agent code
+2. **Agent starts executing** with the provided inputs
+3. **When `call_llm()` is called**, Monty pauses and calls your host function
+4. **Host function returns**, Monty resumes execution
+5. **Agent continues** until it returns a final result
+
+<Info>
+This pause-and-resume pattern allows your agent code to call external services while remaining in a secure sandbox.
+</Info>
+
+## Next Steps
+
+- Learn about [iterative execution](/guides/iterative-execution) for more control
+- See [PydanticAI integration](/examples/pydantic-ai) for a full framework
+- Explore [resource limits](/concepts/resource-limits) to control agent execution

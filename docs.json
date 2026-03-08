@@ -1,122 +1,122 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Monty",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#df8d6f",
+    "light": "#848487",
+    "dark": "#130f0e"
   },
   "favicon": "/favicon.svg",
+  "logo": {
+    "light": "https://media.brand.dev/a8d8b0d7-6d6c-48c4-b436-951ecde852db.png",
+    "dark": "https://media.brand.dev/a8d8b0d7-6d6c-48c4-b436-951ecde852db.png"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/pydantic/monty"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/pydantic/monty"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/security",
+              "concepts/execution-modes",
+              "concepts/serialization",
+              "concepts/resource-limits"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "guides/external-functions",
+              "guides/iterative-execution",
+              "guides/type-checking",
+              "guides/async-execution",
+              "guides/error-handling"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Language Support",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "language/python-subset",
+              "language/stdlib-modules",
+              "language/limitations"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Python",
             "pages": [
-              "api-reference/introduction"
+              "api/python/monty",
+              "api/python/resource-limits",
+              "api/python/snapshots",
+              "api/python/errors"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "JavaScript/TypeScript",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/js/monty",
+              "api/js/resource-limits",
+              "api/js/snapshots",
+              "api/js/errors"
+            ]
+          },
+          {
+            "group": "Rust",
+            "pages": [
+              "api/rust/monty-run",
+              "api/rust/value",
+              "api/rust/heap"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Use Cases",
+            "pages": [
+              "examples/agent-code-mode",
+              "examples/web-scraper",
+              "examples/data-analysis",
+              "examples/sql-playground"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "examples/pydantic-ai",
+              "examples/simple-agent"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

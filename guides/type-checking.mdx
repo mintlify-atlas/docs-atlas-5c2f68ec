@@ -1,0 +1,417 @@
+---
+title: Type Checking
+description: Enable static type checking for your Monty code to catch errors before execution
+---
+
+Monty includes [ty](https://docs.astral.sh/ty/), a modern Python type checker from Astral, built directly into the binary. This allows you to catch type errors before code execution.
+
+## Basic Type Checking
+
+Call `type_check()` on a `Monty` instance to verify types:
+
+<CodeGroup>
+```python Python
+import pydantic_monty
+
+# Code with a type error
+m = pydantic_monty.Monty('"hello" + 1')
+
+try:
+    m.type_check()
+except pydantic_monty.MontyTypingError as e:
+    print(e)
+```
+
+```typescript JavaScript
+import { Monty, MontyTypingError } from '@pydantic/monty'
+
+const m = new Monty('"hello" + 1')
+
+try {
+  m.typeCheck()
+} catch (error) {
+  if (error instanceof MontyTypingError) {
+    console.log(error.displayDiagnostics())
+  }
+}
+```
+</CodeGroup>
+
+Output:
+
+```
+error[unsupported-operator]: Unsupported `+` operation
+ --> main.py:1:1
+  |
+1 | "hello" + 1
+  | -------^^^-
+  |       |   |
+  |       |   Has type `Literal[1]`
+  |       Has type `Literal["hello"]`
+  |
+info: rule `unsupported-operator` is enabled by default
+```
+
+## Enable at Construction
+
+Pass `type_check=True` to enable type checking when creating a `Monty` instance:
+
+<Tabs>
+  <Tab title="Python">
+    ```python
+    import pydantic_monty
+    
+    try:
+        m = pydantic_monty.Monty(
+            '"hello" + 1',
+            type_check=True  # Type check during construction
+        )
+    except pydantic_monty.MontyTypingError as e:
+        print("Type error during construction:", e)
+    ```
+  </Tab>
+
+  <Tab title="JavaScript">
+    ```typescript
+    import { Monty, MontyTypingError } from '@pydantic/monty'
+    
+    try {
+      const m = new Monty('"hello" + 1', {
+        typeCheck: true  // Type check during construction
+      })
+    } catch (error) {
+      if (error instanceof MontyTypingError) {
+        console.log('Type error:', error.displayDiagnostics('concise'))
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+<Info>
+  Type checking is **disabled by default**. This allows you to run code that may not type-check perfectly but works at runtime.
+</Info>
+
+## Type Stubs for External Functions
+
+When your code uses external functions or input variables, provide type stubs to help the type checker:
+
+```python
+import pydantic_monty
+
+code = "result = fetch('https://example.com')"
+
+# Define type stub for external function
+type_stubs = """
+def fetch(url: str) -> str:
+    ...
+"""
+
+m = pydantic_monty.Monty(
+    code,
+    type_check=True,
+    type_check_stubs=type_stubs  # Provide type definitions
+)
+```
+
+### Input Variables
+
+Declare input variables in type stubs:
+
+```python
+code = "result = x + 1"
+
+# Without stubs, 'x' is undefined and fails type checking
+# With stubs, we declare x's type
+m = pydantic_monty.Monty(
+    code,
+    inputs=['x'],
+    type_check=True,
+    type_check_stubs='x = 0'  # Declare x as an int
+)
+```
+
+### Complex Type Definitions
+
+```python
+type_definitions = """
+from typing import Any
+
+Messages = list[dict[str, Any]]
+
+async def call_llm(prompt: str, messages: Messages) -> str | Messages:
+    ...
+
+prompt: str = ''
+"""
+
+code = """
+async def agent(prompt: str, messages: Messages):
+    while True:
+        output = await call_llm(prompt, messages)
+        if isinstance(output, str):
+            return output
+        messages.extend(output)
+
+await agent(prompt, [])
+"""
+
+m = pydantic_monty.Monty(
+    code,
+    inputs=['prompt'],
+    type_check=True,
+    type_check_stubs=type_definitions
+)
+```
+
+<Note>
+  Type stubs are only used for type checking. They don't affect runtime behavior or provide default values.
+</Note>
+
+## Type Checking Function Definitions
+
+Monty validates function return types:
+
+```python
+code = """
+def foo() -> int:
+    return "not an int"
+"""
+
+m = pydantic_monty.Monty(code)
+
+try:
+    m.type_check()
+except pydantic_monty.MontyTypingError as e:
+    print(e)
+```
+
+Output:
+
+```
+error[invalid-return-type]: Return type does not match returned value
+ --> main.py:2:14
+  |
+2 | def foo() -> int:
+  |              --- Expected `int` because of return type
+3 |     return "not an int"
+  |            ^^^^^^^^^^^^ expected `int`, found `Literal["not an int"]`
+  |
+info: rule `invalid-return-type` is enabled by default
+```
+
+## Undefined Variables
+
+Type checking catches references to undefined variables:
+
+```python
+m = pydantic_monty.Monty('print(undefined_var)')
+
+try:
+    m.type_check()
+except pydantic_monty.MontyTypingError as e:
+    print(e)
+```
+
+Output:
+
+```
+error[unresolved-reference]: Name `undefined_var` used when not defined
+ --> main.py:1:7
+  |
+1 | print(undefined_var)
+  |       ^^^^^^^^^^^^^
+  |
+info: rule `unresolved-reference` is enabled by default
+```
+
+## Display Formats
+
+Control how type errors are displayed:
+
+### Full Format (Default)
+
+```python
+try:
+    m.type_check()
+except pydantic_monty.MontyTypingError as e:
+    print(e.display())  # or str(e)
+```
+
+### Concise Format
+
+```python
+try:
+    m.type_check()
+except pydantic_monty.MontyTypingError as e:
+    print(e.display('concise'))
+```
+
+Output:
+
+```
+main.py:1:1: error[unsupported-operator] Operator `+` is not supported between objects of type `Literal["hello"]` and `Literal[1]`
+```
+
+### Type and Message Only
+
+```python
+try:
+    m.type_check()
+except pydantic_monty.MontyTypingError as e:
+    print(e.display('type-msg'))
+```
+
+Output:
+
+```
+error[unsupported-operator]: Unsupported `+` operation
+```
+
+## JavaScript Display Options
+
+```typescript
+import { Monty, MontyTypingError } from '@pydantic/monty'
+
+const m = new Monty('"hello" + 1')
+
+try {
+  m.typeCheck()
+} catch (error) {
+  if (error instanceof MontyTypingError) {
+    // Full format (default)
+    console.log(error.displayDiagnostics())
+    
+    // Concise format
+    console.log(error.displayDiagnostics('concise'))
+  }
+}
+```
+
+## Catching Type Errors
+
+`MontyTypingError` is a subclass of `MontyError`:
+
+```python
+import pydantic_monty
+
+try:
+    m = pydantic_monty.Monty('"hello" + 1', type_check=True)
+except pydantic_monty.MontyTypingError as e:
+    # Specific type error handling
+    print("Type error:", e.display('concise'))
+except pydantic_monty.MontyError as e:
+    # General Monty error
+    print("Monty error:", e)
+```
+
+## Prefix Code in Manual Type Checking
+
+You can provide prefix code when calling `type_check()` manually:
+
+```python
+m = pydantic_monty.Monty('result = x + 1')
+
+# Without prefix, x is undefined and fails
+try:
+    m.type_check()
+except pydantic_monty.MontyTypingError:
+    print("Failed without prefix")
+
+# With prefix declaring x, it passes
+m.type_check(prefix_code='x = 0')
+print("Passed with prefix")
+```
+
+<Note>
+  Use `prefix_code` parameter for one-off type checks. For construction-time type checking, use `type_check_stubs` instead.
+</Note>
+
+## Type Checking with Async Code
+
+Type checking works with async functions:
+
+```python
+code = """
+async def fetch_data():
+    return "data"
+
+await fetch_data()
+"""
+
+m = pydantic_monty.Monty(code)
+m.type_check()  # Passes
+```
+
+## Best Practices
+
+<Steps>
+  <Step title="Use type hints">
+    Add type hints to your function definitions for better error messages:
+    
+    ```python
+    def add(a: int, b: int) -> int:
+        return a + b
+    ```
+  </Step>
+
+  <Step title="Provide comprehensive stubs">
+    Include all external functions and input variables in your type stubs:
+    
+    ```python
+    stubs = """
+    def external_func(x: int) -> str: ...
+    input_var: int = 0
+    """
+    ```
+  </Step>
+
+  <Step title="Enable early for LLM code">
+    Use `type_check=True` during construction to catch errors before execution:
+    
+    ```python
+    m = pydantic_monty.Monty(llm_generated_code, type_check=True)
+    ```
+  </Step>
+
+  <Step title="Handle type errors gracefully">
+    Catch `MontyTypingError` and provide feedback to your LLM or user:
+    
+    ```python
+    try:
+        m = pydantic_monty.Monty(code, type_check=True)
+    except pydantic_monty.MontyTypingError as e:
+        # Send error back to LLM for correction
+        print(f"Type error: {e.display('concise')}")
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Type checking does not guarantee runtime correctness. It catches many common errors but cannot prevent all runtime issues (e.g., division by zero, logic errors).
+</Warning>
+
+## When to Skip Type Checking
+
+Type checking is disabled by default because:
+
+1. **Dynamic code patterns**: Some valid runtime patterns don't type check
+2. **Rapid prototyping**: Type checking adds overhead during development
+3. **Partial type coverage**: Not all code paths may have complete type information
+
+You can skip type checking and rely on runtime validation when:
+
+- Code is simple and well-tested
+- Performance is critical
+- You're using dynamic patterns that are hard to type
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="External Functions" icon="plug" href="/guides/external-functions">
+    Learn how to define external function type stubs
+  </Card>
+  <Card title="Error Handling" icon="triangle-exclamation" href="/guides/error-handling">
+    Handle runtime errors and exceptions
+  </Card>
+</CardGroup>
