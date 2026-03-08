@@ -370,3 +370,164 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## MontyRepl
+
+The `MontyRepl` class provides an incremental, no-replay REPL (Read-Eval-Print Loop) session. Each `feed()` call compiles and executes only the provided snippet against preserved heap/global state, unlike traditional REPLs that replay all history.
+
+### create() (static method)
+
+```python
+@staticmethod
+def create(
+    code: str,
+    *,
+    script_name: str = 'main.py',
+    inputs: list[str] | None = None,
+    start_inputs: dict[str, Any] | None = None,
+    limits: ResourceLimits | None = None,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+    dataclass_registry: list[type] | None = None,
+) -> tuple[MontyRepl, Any]
+```
+
+Create a REPL session directly from source code. Returns a tuple of `(repl, output)` where `output` is the initial execution result.
+
+<ParamField path="code" type="str" required>
+  Initial Python code to execute
+</ParamField>
+
+<ParamField path="script_name" type="str" default="'main.py'">
+  Name used in tracebacks and error messages
+</ParamField>
+
+<ParamField path="inputs" type="list[str] | None">
+  List of input variable names available in the code
+</ParamField>
+
+<ParamField path="start_inputs" type="dict[str, Any] | None">
+  Initial input values for the session
+</ParamField>
+
+<ParamField path="limits" type="ResourceLimits | None">
+  Optional resource limits configuration
+</ParamField>
+
+<ParamField path="print_callback" type="Callable[[Literal['stdout'], str], None] | None">
+  Optional callback for print output
+</ParamField>
+
+<ParamField path="dataclass_registry" type="list[type] | None">
+  Optional list of dataclass types to register
+</ParamField>
+
+<ResponseField type="tuple[MontyRepl, Any]">
+  A tuple containing the REPL session and the initial execution result
+</ResponseField>
+
+**Raises:**
+- `MontySyntaxError`: If the code cannot be parsed
+- `MontyRuntimeError`: If the code raises an exception during execution
+
+### script_name (property)
+
+```python
+@property
+def script_name(self) -> str
+```
+
+Returns the name of the script being executed.
+
+### feed()
+
+```python
+def feed(
+    self,
+    code: str,
+    *,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+) -> Any
+```
+
+Execute one incremental snippet and return its output. The snippet is compiled and executed against the current session state without replaying previous code.
+
+<ParamField path="code" type="str" required>
+  Python code snippet to execute
+</ParamField>
+
+<ParamField path="print_callback" type="Callable[[Literal['stdout'], str], None] | None">
+  Optional callback for print output
+</ParamField>
+
+<ResponseField type="Any">
+  The result of the code snippet
+</ResponseField>
+
+**Raises:**
+- `MontyRuntimeError`: If the code raises an exception during execution
+
+#### Example
+
+```python
+import pydantic_monty
+
+# Create REPL with initial state
+repl, initial = pydantic_monty.MontyRepl.create("x = 1")
+print(initial)
+# Output: None (assignment has no return value)
+
+# Feed additional snippets
+result = repl.feed("x + 10")
+print(result)
+# Output: 11
+
+# State is preserved
+result = repl.feed("x = x * 2; x")
+print(result)
+# Output: 2
+```
+
+### dump()
+
+```python
+def dump(self) -> bytes
+```
+
+Serialize the REPL session to bytes. The serialized data can be stored and later restored with `MontyRepl.load()`.
+
+<ResponseField type="bytes">
+  Bytes containing the serialized REPL session
+</ResponseField>
+
+### load() (static method)
+
+```python
+@staticmethod
+def load(
+    data: bytes,
+    *,
+    print_callback: Callable[[Literal['stdout'], str], None] | None = None,
+    dataclass_registry: list[type] | None = None,
+) -> MontyRepl
+```
+
+Restore a REPL session from bytes.
+
+<ParamField path="data" type="bytes" required>
+  The serialized REPL data from `dump()`
+</ParamField>
+
+<ParamField path="print_callback" type="Callable[[Literal['stdout'], str], None] | None">
+  Optional callback for print output
+</ParamField>
+
+<ParamField path="dataclass_registry" type="list[type] | None">
+  Optional list of dataclass types to register
+</ParamField>
+
+<ResponseField type="MontyRepl">
+  A new MontyRepl instance
+</ResponseField>
+
+**Raises:**
+- `ValueError`: If deserialization fails

@@ -298,3 +298,125 @@ const result = await runMontyAsync(m, {
   },
 })
 ```
+
+## MontyRepl
+
+The `MontyRepl` class provides an incremental, no-replay REPL (Read-Eval-Print Loop) session. Each `feed()` call compiles and executes only the provided snippet against preserved heap/global state.
+
+### create() (static method)
+
+```typescript
+static create(
+  code: string,
+  options?: MontyOptions,
+  startOptions?: StartOptions
+): MontyRepl
+```
+
+Creates a REPL session directly from source code.
+
+<ParamField path="code" type="string" required>
+  Initial Python code to execute
+</ParamField>
+
+<ParamField path="options" type="MontyOptions">
+  Configuration options (scriptName, inputs, typeCheck, etc.)
+</ParamField>
+
+<ParamField path="startOptions" type="StartOptions">
+  Execution options for the initial code (inputs, limits)
+</ParamField>
+
+<ResponseField name="repl" type="MontyRepl">
+  A new REPL session instance
+</ResponseField>
+
+**Throws:**
+- `MontySyntaxError` - If the code has syntax errors
+- `MontyRuntimeError` - If execution fails
+- `MontyTypingError` - If type checking is enabled and finds errors
+
+### scriptName (property)
+
+```typescript
+get scriptName(): string
+```
+
+Returns the script name for this REPL session.
+
+### feed()
+
+```typescript
+feed(code: string): any
+```
+
+Executes one incremental snippet and returns its output. The snippet is compiled and executed against the current session state without replaying previous code.
+
+<ParamField path="code" type="string" required>
+  Python code snippet to execute
+</ParamField>
+
+<ResponseField name="result" type="any">
+  The result of the code snippet
+</ResponseField>
+
+**Throws:**
+- `MontyRuntimeError` - If execution fails
+
+**Example:**
+
+```typescript
+import { MontyRepl } from '@pydantic/monty'
+
+// Create REPL with initial state
+const repl = MontyRepl.create("x = 1")
+
+// Feed additional snippets
+const result1 = repl.feed("x + 10")
+console.log(result1)
+// Output: 11
+
+// State is preserved
+const result2 = repl.feed("x = x * 2; x")
+console.log(result2)
+// Output: 2
+```
+
+### dump()
+
+```typescript
+dump(): Buffer
+```
+
+Serializes the REPL session to bytes for later restoration.
+
+<ResponseField name="data" type="Buffer">
+  Serialized REPL session data
+</ResponseField>
+
+### load() (static method)
+
+```typescript
+static load(data: Buffer): MontyRepl
+```
+
+Restores a REPL session from bytes.
+
+<ParamField path="data" type="Buffer" required>
+  Serialized REPL data from `dump()`
+</ParamField>
+
+<ResponseField name="repl" type="MontyRepl">
+  Restored REPL session
+</ResponseField>
+
+**Throws:**
+- `ValueError` - If deserialization fails
+
+### repr()
+
+```typescript
+repr(): string
+```
+
+Returns a string representation of the REPL session.
