@@ -1,0 +1,129 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "Monty",
+  "projectDescription": "A minimal, secure Python interpreter written in Rust for use by AI agents",
+  "theme": "aspen",
+  "primaryColor": "#df8d6f",
+  "lightColor": "#848487",
+  "darkColor": "#130f0e",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "installation",
+              "quickstart"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/security",
+              "concepts/execution-modes",
+              "concepts/serialization",
+              "concepts/resource-limits"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/external-functions",
+              "guides/iterative-execution",
+              "guides/type-checking",
+              "guides/async-execution",
+              "guides/error-handling"
+            ]
+          },
+          {
+            "group": "Language Support",
+            "pages": [
+              "language/python-subset",
+              "language/stdlib-modules",
+              "language/limitations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Python",
+            "pages": [
+              "api/python/monty",
+              "api/python/resource-limits",
+              "api/python/snapshots",
+              "api/python/errors"
+            ]
+          },
+          {
+            "group": "JavaScript/TypeScript",
+            "pages": [
+              "api/js/monty",
+              "api/js/resource-limits",
+              "api/js/snapshots",
+              "api/js/errors"
+            ]
+          },
+          {
+            "group": "Rust",
+            "pages": [
+              "api/rust/monty-run",
+              "api/rust/value",
+              "api/rust/heap"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Use Cases",
+            "pages": [
+              "examples/agent-code-mode",
+              "examples/web-scraper",
+              "examples/data-analysis",
+              "examples/sql-playground"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "examples/pydantic-ai",
+              "examples/simple-agent"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Sandboxed Python execution with strict security guarantees",
+    "Multi-language bindings (Python, JavaScript/TypeScript, Rust)",
+    "Microsecond startup time and snapshotting support",
+    "Type checking with integrated ty/ruff support",
+    "Resource limits (memory, allocations, execution time)",
+    "External function callbacks for controlled I/O",
+    "Iterative execution with pause/resume at function calls",
+    "Serialization of parsed code and execution state"
+  ],
+  "publicApiSurface": [
+    "pydantic_monty.Monty",
+    "pydantic_monty.run_monty_async",
+    "pydantic_monty.FunctionSnapshot",
+    "pydantic_monty.MontyComplete",
+    "pydantic_monty.ResourceLimits",
+    "@pydantic/monty.Monty",
+    "@pydantic/monty.runMontyAsync",
+    "@pydantic/monty.MontySnapshot",
+    "@pydantic/monty.MontyComplete",
+    "monty::MontyRun",
+    "monty::MontyObject",
+    "monty::RunProgress"
+  ]
+}
